@@ -1,0 +1,16 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/fileformats
+fileformats.so
+fileformats.dylib
+fileformats.dll
+fileformats.a
+fileformats.lib
+fileformats-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst
