@@ -324,14 +324,10 @@ private:
                     return scanActual(token);
             }
 
-            // TODO: lex template substitution tail (or middle if ends with ${)
+            // identical to head except its TemplateSubstitutionMiddle if ends with ${
+            // otherwise its TemplateSubstitutionTail if it ends with `
 
-            // end of ${
-            this.token.type = Token.Type.TemplateSubstitutionMiddle;
-
-            // end of `
-            this.token.type = Token.Type.TemplateSubstitutionTail;
-
+            parseTemplateLiteralBegin(token, false);
         } else
             scanActual(token);
     }
@@ -851,6 +847,10 @@ private:
                     return;
                 }
 
+            case '`':
+                parseTemplateLiteralBegin(token, true);
+                return;
+
             default: {
                     currentCharacter--;
                     this.currentLocation.lineOffset--;
@@ -1325,6 +1325,110 @@ private:
         }
     }
 
+    void parseTemplateLiteralBegin(ref Token token, bool isHead) @trusted {
+        import sidero.base.encoding.utf : decodeLength;
+
+        // template substitution https://262.ecma-international.org/15.0/index.html#prod-TemplateSubstitutionTail
+
+        const(char)* startToken = currentCharacter;
+        size_t consumed, given;
+
+        char asciiChar;
+
+        while(currentCharacter < endOfFile) {
+            asciiChar = *currentCharacter;
+
+            if(asciiChar == '\\') {
+                currentCharacter++;
+                this.currentLocation.lineOffset++;
+
+                if(!skipEscape(consumed, given))
+                    goto TemplateLiteralEscapeError;
+            } else if(asciiChar == '`' || (asciiChar == '$' && *(currentCharacter + 1) == '{')) {
+                break;
+            } else {
+                const countChars = decodeLength(asciiChar);
+
+                if(countChars == 1 && *currentCharacter == '\n') {
+                    this.currentLocation.lineNumber++;
+                    this.currentLocation.lineOffset = 0;
+                } else if(countChars == 4 && *currentCharacter == 0xE2 && *(currentCharacter + 1) == 0x80 &&
+                        (*(currentCharacter + 2) == 0xA8 || *(currentCharacter + 2) == 0xA9)) {
+                    this.currentLocation.lineNumber++;
+                    this.currentLocation.lineOffset = 0;
+                } else
+                    this.currentLocation.lineOffset++;
+
+                currentCharacter += countChars;
+            }
+        }
+
+        {
+            SmallArray!char array = SmallArray!char(((currentCharacter - startToken) - consumed) + given);
+            char[] buffer = array.get;
+            size_t usedOfBuffer;
+
+            const(char)* ptr = startToken;
+
+            while(ptr < endOfFile) {
+                asciiChar = *ptr;
+
+                if(asciiChar == '\\') {
+                    ptr++;
+                    this.currentLocation.lineOffset++;
+
+                    dchar decoded = parseEscape(ptr, buffer, usedOfBuffer);
+                } else if(asciiChar == '`' || (asciiChar == '$' && *(ptr + 1) == '{')) {
+                    break;
+                } else {
+                    const countChars = decodeLength(asciiChar);
+
+                    if(countChars == 1 && *ptr == '\n') {
+                        this.currentLocation.lineNumber++;
+                        this.currentLocation.lineOffset = 0;
+                    } else if(countChars == 4 && *ptr == 0xE2 && *(ptr + 1) == 0x80 && (*(ptr + 2) == 0xA8 || *(ptr + 2) == 0xA9)) {
+                        this.currentLocation.lineNumber++;
+                        this.currentLocation.lineOffset = 0;
+                    } else
+                        this.currentLocation.lineOffset++;
+
+                    foreach(i; 0 .. countChars) {
+                        buffer[usedOfBuffer++] = *(ptr + i);
+                    }
+
+                    ptr += countChars;
+                }
+            }
+
+            if(*currentCharacter == '`') {
+                // stop at `
+                currentCharacter++;
+                this.currentCharacter++;
+                token.type = isHead ? Token.Type.String : Token.Type.TemplateSubstitutionTail;
+            } else if(*currentCharacter == '$' && *(currentCharacter + 1) == '{') {
+                // stop at ${
+                this.inTemplate = true;
+                token.type = isHead ? Token.Type.TemplateSubstitutionHead : Token.Type.TemplateSubstitutionMiddle;
+
+                this.currentCharacter += 2;
+                this.currentLocation.lineOffset += 2;
+                this.inTemplateSubstitution = true;
+            } else
+                goto TemplateLiteralError;
+
+            token.text = String_UTF8(buffer[0 .. usedOfBuffer]).dup;
+            return;
+        }
+
+    TemplateLiteralError:
+        // TODO: error;
+        return;
+
+    TemplateLiteralEscapeError:
+        // TODO: error
+        return;
+    }
+
     bool skipEscape(ref size_t consumed, ref size_t given) @trusted {
         import sidero.base.encoding.utf : encodeLengthUTF8, decode;
 
@@ -1751,6 +1855,100 @@ unittest {
                 assert(0);
             }
         }
+
+        void testSuccessTemplateString(string mod = __MODULE__, int line = __LINE__)(string contents, string[] texts...) {
+            assert(texts.length > 1 && texts.length % 2 == 1);
+            string filename = text(mod, ":", line);
+
+            Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents));
+
+            {
+                auto got = lexer.token;
+
+                if(got.type != Token.Type.TemplateSubstitutionHead) {
+                    debugWriteln(got);
+                    assert(0);
+                }
+
+                if(got.text != texts[0]) {
+                    debugWriteln(got);
+                    assert(0);
+                }
+
+                lexer.popFront();
+            }
+
+            for(size_t i = 1; i + 2 < texts.length; i += 2) {
+                {
+                    auto got = lexer.token;
+
+                    if(got.type != Token.Type.Identifier) {
+                        debugWriteln(got);
+                        assert(0);
+                    }
+
+                    if(got.text != texts[i]) {
+                        debugWriteln(got, texts[i]);
+                        assert(0);
+                    }
+
+                    lexer.popFront();
+                }
+
+                {
+                    auto got = lexer.token;
+
+                    if(got.type != Token.Type.TemplateSubstitutionMiddle) {
+                        debugWriteln(got);
+                        assert(0);
+                    }
+
+                    if(got.text != texts[i + 1]) {
+                        debugWriteln(got, texts[i + 1]);
+                        assert(0);
+                    }
+
+                    lexer.popFront();
+                }
+            }
+
+            {
+                auto got = lexer.token;
+
+                if(got.type != Token.Type.Identifier) {
+                    debugWriteln(got);
+                    assert(0);
+                }
+
+                if(got.text != texts[$ - 2]) {
+                    debugWriteln(got, texts[$ - 2]);
+                    assert(0);
+                }
+
+                lexer.popFront();
+            }
+
+            {
+                auto got = lexer.token;
+
+                if(got.type != Token.Type.TemplateSubstitutionTail) {
+                    debugWriteln(got);
+                    assert(0);
+                }
+
+                if(got.text != texts[$ - 1]) {
+                    debugWriteln(got, texts[$ - 1]);
+                    assert(0);
+                }
+
+                lexer.popFront();
+            }
+
+            if(lexer.front != Token.Type.EndOfFile) {
+                debugWriteln(lexer.token);
+                assert(0);
+            }
+        }
     }
 
     Check.testSuccessIdentifier("$h_el9lo5", "$h_el9lo5");
@@ -1914,4 +2112,10 @@ unittest {
     Check.testSuccessString("\"b\\u0053e\"", "bSe");
     Check.testSuccessString("\"b\\u{000054}e\"", "bTe");
     Check.testSuccessString("\"b\\uD835\\uDD04e\"", "b\U0001D504e");
+
+    // templated strings
+    Check.testSuccessString("`thing`", "thing");
+    Check.testSuccessTemplateString("`b${ident}e`", "b", "ident", "e");
+    Check.testSuccessTemplateString("`b${ident}mi${another}e`", "b", "ident", "mi", "another", "e");
+    Check.testSuccessTemplateString("`b${ident}mi${another}but${tok}e`", "b", "ident", "mi", "another", "but", "tok", "e");
 }
