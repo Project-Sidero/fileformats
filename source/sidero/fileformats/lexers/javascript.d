@@ -70,6 +70,7 @@ Tokens:
 
 - template literal
 
+Missing: regular expressions
 +/
 
 /**
@@ -113,7 +114,7 @@ struct Lexer_Javascript {
             double number;
 
             ///
-            char punctuation;
+            wchar punctuation;
 
             ///
             dchar character;
@@ -162,6 +163,153 @@ struct Lexer_Javascript {
             this.destroy;
             this.__ctor(other);
         }
+    }
+
+    ///
+    enum PunctuationChars : wchar {
+        ///
+        OpenBrace = '{',
+        ///
+        CloseBrace = '}',
+        ///
+        OpenBracket = '(',
+        ///
+        CloseBracket = ')',
+        ///
+        OpenSquareBracket = '[',
+        ///
+        CloseSquareBracket = ']',
+        ///
+        Divide = '/',
+        ///
+        Dot = '.',
+        ///
+        Colon = ':',
+        ///
+        SemiColon = ';',
+        ///
+        Comma = ',',
+        ///
+        LessThan = '<',
+        ///
+        MoreThan = '>',
+        ///
+        Plus = '+',
+        ///
+        Minus = '-',
+        ///
+        Star = '*',
+        ///
+        Percent = '%',
+        ///
+        And = '&',
+        ///
+        Pipe = '|',
+        ///
+        Caret = '^',
+        ///
+        ExclamationMark = '!',
+        ///
+        Tilde = '~',
+        ///
+        QuestionMark = '?',
+        ///
+        EqualSign = '=',
+
+        /// ...
+        ListConcatenation = '\uE000',
+        /// <=
+        LessThanEqualTo,
+        /// >=
+        MoreThanEqualTo,
+        /// ==
+        EqualTo,
+        /// !=
+        NotEqualTo,
+        /// ===
+        StrictlyEqual,
+        /// !==
+        StrictlyNotEqual,
+        /// **
+        Exponention,
+        /// ++
+        Increment,
+        /// --
+        Decrement,
+        /// <<
+        LeftShift,
+        /// >>
+        SignedRightShift,
+        /// >>>
+        UnsignedRightShift,
+        /// &&
+        BooleanAnd,
+        /// ||
+        BooleanOr,
+
+        /// ??
+        Coalesce,
+        /// ?.
+        OptionalChain,
+        /// +=
+        AddAssign,
+        /// -=
+        SubtractAssign,
+        /// *=
+        MultiplyAssign,
+        /// /=
+        DivideAssign,
+        /// %=
+        ModulasAssign,
+        /// **=
+        ExponentionAssign,
+        /// <<=
+        LeftShiftAssign,
+        /// >>=
+        SignedRightShiftAssign,
+        /// >>>=
+        UnsignedRightShiftAssign,
+        /// &=
+        AndAssign,
+        /// |=
+        OrAssign,
+        /// ^=
+        CaretAssign,
+        /// &=
+        BooleanAndAssign,
+        /// ||=
+        BooleanOrAssign,
+        /// ??=
+        CoalesceAssign,
+        /// =>
+        ArrowFunction,
+
+        ///
+        Max
+    }
+
+    ///
+    static string punctuationToText(wchar c) @safe nothrow @nogc pure {
+        static immutable Table1 = [
+            "...", "<=", ">=", "==", "!=", "===", "!==", "**", "++", "--", "<<", ">>", ">>>", "&&", "||", "??", "?.",
+            "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=", "??=", "=>"
+        ];
+        static immutable Table2 = () {
+            string ret;
+
+            foreach(c; 0 .. 128 + 1) {
+                ret ~= cast(char)c;
+            }
+
+            return ret;
+        }();
+
+        if(c >= PunctuationChars.ListConcatenation && c <= PunctuationChars.Max)
+            return Table1[c - '\uE000'];
+        else if(c < 128)
+            return Table2[c .. c + 1];
+        else
+            return null;
     }
 
 export @safe nothrow @nogc:
@@ -364,16 +512,237 @@ private:
                 // ignore
                 break;
 
-            case '!':
-            case '%': .. case '&':
-            case '(': .. case ',':
-            case ':': .. case '?':
+                //"=>"
+
+            case '(':
+            case ')':
+            case ',':
+            case ':':
+            case ';':
             case '[':
-            case ']': .. case '^':
-            case '{': .. case '~':
+            case ']':
+            case '{':
+            case '}':
+            case '~':
                 token.type = Token.Type.Punctuation;
                 token.punctuation = asciiChar;
                 return;
+
+            case '<': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.LessThanEqualTo;
+                    } else if(*currentCharacter == '<') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.LeftShiftAssign;
+                        } else
+                            token.punctuation = PunctuationChars.LeftShift;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '>': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.MoreThanEqualTo;
+                    } else if(*currentCharacter == '>') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.SignedRightShiftAssign;
+                        } else if(*currentCharacter == '>') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+
+                            if(*currentCharacter == '=') {
+                                currentCharacter++;
+                                this.currentLocation.lineOffset++;
+                                token.punctuation = PunctuationChars.UnsignedRightShiftAssign;
+                            } else
+                                token.punctuation = PunctuationChars.UnsignedRightShift;
+                        } else
+                            token.punctuation = PunctuationChars.SignedRightShift;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '=': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.StrictlyEqual;
+                        } else
+                            token.punctuation = PunctuationChars.EqualTo;
+                    } else if(*currentCharacter == '>') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.ArrowFunction;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '!': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.StrictlyNotEqual;
+                        } else
+                            token.punctuation = PunctuationChars.NotEqualTo;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '*': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '*') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.ExponentionAssign;
+                        } else
+                            token.punctuation = PunctuationChars.Exponention;
+                    } else if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.MultiplyAssign;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '&': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '&') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.BooleanAndAssign;
+                        } else
+                            token.punctuation = PunctuationChars.BooleanAnd;
+                    } else if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.AndAssign;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '|': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '|') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.BooleanOrAssign;
+                        } else
+                            token.punctuation = PunctuationChars.BooleanOr;
+                    } else if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.OrAssign;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '?': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '?') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.CoalesceAssign;
+                        } else
+                            token.punctuation = PunctuationChars.Coalesce;
+                    } else if(*currentCharacter == '.') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.OptionalChain;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '%': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.ModulasAssign;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
+
+            case '^': {
+                    token.type = Token.Type.Punctuation;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.CaretAssign;
+                    } else
+                        token.punctuation = asciiChar;
+
+                    return;
+                }
 
             case '_':
             case '$':
@@ -547,7 +916,59 @@ private:
                         lexDecimalNumber(token);
                     } else {
                         token.type = Token.Type.Punctuation;
-                        token.punctuation = asciiChar;
+
+                        if(*currentCharacter == '.' && *(currentCharacter + 1) == '.') {
+                            currentCharacter += 2;
+                            this.currentLocation.lineOffset += 2;
+                            token.punctuation = PunctuationChars.ListConcatenation;
+                        } else
+                            token.punctuation = asciiChar;
+                    }
+
+                    return;
+                }
+
+            case '-': {
+                    if(*currentCharacter >= '0' && *currentCharacter <= '9') {
+                        currentCharacter--;
+                        this.currentLocation.lineOffset--;
+                        lexDecimalNumber(token);
+                    } else {
+                        token.type = Token.Type.Punctuation;
+
+                        if(*currentCharacter == '-') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.Decrement;
+                        } else if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.SubtractAssign;
+                        } else
+                            token.punctuation = asciiChar;
+                    }
+
+                    return;
+                }
+
+            case '+': {
+                    if(*currentCharacter >= '0' && *currentCharacter <= '9') {
+                        currentCharacter--;
+                        this.currentLocation.lineOffset--;
+                        lexDecimalNumber(token);
+                    } else {
+                        token.type = Token.Type.Punctuation;
+
+                        if(*currentCharacter == '+') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.Increment;
+                        } else if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.AddAssign;
+                        } else
+                            token.punctuation = asciiChar;
                     }
 
                     return;
@@ -693,7 +1114,13 @@ private:
 
                     // punctuation
                     token.type = Token.Type.Punctuation;
-                    token.punctuation = asciiChar;
+
+                    if(*currentCharacter == '=') {
+                        currentCharacter++;
+                        this.currentLocation.lineOffset++;
+                        token.punctuation = PunctuationChars.DivideAssign;
+                    } else
+                        token.punctuation = asciiChar;
                     return;
                 }
 
@@ -1798,11 +2225,11 @@ unittest {
             }
         }
 
-        void testSuccessPunctuation(string mod = __MODULE__, int line = __LINE__)(string contents, char expected, bool allowNext = false) {
+        void testSuccessPunctuation(string mod = __MODULE__, int line = __LINE__)(string contents, wchar expected, bool allowNext = false) {
             Lexer_Javascript.Token token = testSuccess!(mod, line)(contents, Token.Type.Punctuation, allowNext);
 
             if(token.punctuation != expected) {
-                debugWriteln(token);
+                debugWriteln(token, Lexer_Javascript.punctuationToText(token.punctuation), contents);
                 assert(0);
             }
         }
@@ -2085,6 +2512,12 @@ unittest {
     Check.testSuccessPunctuation("/ 9", '/', true);
     Check.testSuccessPunctuation("/ *", '/', true);
     Check.testSuccessPunctuation("/ /", '/', true);
+
+    // Multi-char punctuation
+    static foreach(m; __traits(allMembers, Lexer_Javascript.PunctuationChars)[0 .. $-1]) {
+        Check.testSuccessPunctuation(Lexer_Javascript.punctuationToText(__traits(getMember,
+                Lexer_Javascript.PunctuationChars, m)), __traits(getMember, Lexer_Javascript.PunctuationChars, m));
+    }
 
     // multi line comment
     Check.testSuccessMultiLineComment("/*some text*/", "some text");
