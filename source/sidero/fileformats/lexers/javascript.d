@@ -407,9 +407,17 @@ export @safe nothrow @nogc:
             endOfFile = text.ptr + text.length;
         }
 
-        foreach(k; __traits(allMembers, Keywords)) {
-            this.interning.preFill(__traits(getMember, Keywords, k));
-        }
+        static String_UTF8[] tableOfKeywords = () {
+            String_UTF8[] ret;
+
+            static foreach(k; __traits(allMembers, Keywords)) {
+                ret ~= __traits(getMember, Keywords, k);
+            }
+
+            return ret;
+        }();
+
+        this.interning.preFill(tableOfKeywords);
     }
 
     this(return scope ref Lexer_Javascript other) scope @trusted {
