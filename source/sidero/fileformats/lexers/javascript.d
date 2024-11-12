@@ -216,27 +216,27 @@ struct Lexer_Javascript {
 
         ~this() scope @trusted {
             final switch(this.type) {
-                case Type.EndOfFile:
-                case Type.Punctuation:
-                case Type.Character:
-                case Type.Number:
-                    return;
+            case Type.EndOfFile:
+            case Type.Punctuation:
+            case Type.Character:
+            case Type.Number:
+                return;
 
-                case Type.HashBangComment:
-                case Type.SingleLineComment:
-                case Type.MultiLineComment:
-                case Type.Identifier:
-                case Type.String:
-                case Type.RegexString:
-                case Type.TemplateSubstitutionHead:
-                case Type.TemplateSubstitutionMiddle:
-                case Type.TemplateSubstitutionTail:
-                    this.text.destroy;
-                    return;
+            case Type.HashBangComment:
+            case Type.SingleLineComment:
+            case Type.MultiLineComment:
+            case Type.Identifier:
+            case Type.String:
+            case Type.RegexString:
+            case Type.TemplateSubstitutionHead:
+            case Type.TemplateSubstitutionMiddle:
+            case Type.TemplateSubstitutionTail:
+                this.text.destroy;
+                return;
 
-                case Type.BigInteger:
-                    this.bigInteger.destroy;
-                    return;
+            case Type.BigInteger:
+                this.bigInteger.destroy;
+                return;
             }
         }
 
@@ -959,9 +959,9 @@ private:
                                 char c;
 
                                 if(!(*currentCharacter == '\\' && *(currentCharacter + 1) == 'u'))
-                                    goto EscapeSurrogateError;
+                                    goto EscapeIdentifierError;
                                 else if(*(currentCharacter + 2) == '{')
-                                    goto EscapeSurrogateError;
+                                    goto EscapeIdentifierError;
 
                                 static foreach(i; 0 .. 4) {
                                     static if(i > 0)
@@ -995,11 +995,10 @@ private:
                         goto EscapeIdentifierError;
 
             EscapeIdentifierError:
-                    // TODO: error
-                    return;
-
-            EscapeSurrogateError:
-                    // TODO: error
+                    this.errorSink.error(token.loc, "Identifier start is not valid.");
+                    this.errorSink.errorSupplimental("Valid characters must be part of start set.");
+                    this.errorSink.errorSupplimental(
+                            "May be an escaped UTF-16 code unit `\\uXXXX`, two may be used for UTF-16 surrogates.");
                     return;
                 }
 
@@ -1103,7 +1102,6 @@ private:
                 }
 
             case '#': {
-
                     if(*currentCharacter == '!') {
                         // single line comment
                         currentCharacter++;
@@ -1145,7 +1143,8 @@ private:
                         return;
                     }
 
-                    // TODO: error
+                    errorSink.error(token.loc, "Unknown character `#`");
+                    errorSink.errorSupplimental("Hash bang comments are of syntax `#!...\\n`");
                     return;
                 }
 
@@ -1433,15 +1432,18 @@ private:
                     return;
 
             RegexStartError:
-                    // TODO: error
+                    errorSink.error(token.loc, "Not a valid start for regex literal");
+                    errorSink.errorSupplimental(
+                            "Must be either a class `/[...]`, escape `\\c`, or a character that isn't `/` or a new line.");
                     return;
 
             RegexNextError:
-                    // TODO: error
+                    errorSink.error(token.loc, "Not a valid body for regex literal");
+                    errorSink.errorSupplimental("Must be either a class `/[...]`, escape `\\c`, or a character that isn't a new line.");
                     return;
 
             RegexEndError:
-                    // TODO: error
+                    errorSink.error(token.loc, "Not a valid end for regex literal, missing `/`");
                     return;
                 }
 
@@ -1457,7 +1459,7 @@ private:
                         const(char)* startToken = currentCharacter;
 
                         if(!skipEscape(consumed, given))
-                            goto CharacterLiteralEscapeError;
+                            goto CharacterLiteralError;
 
                         if(*currentCharacter != '\'')
                             goto CharacterLiteralError;
@@ -1498,11 +1500,8 @@ private:
                     return;
 
             CharacterLiteralError:
-                    // TODO: error
-                    return;
-
-            CharacterLiteralEscapeError:
-                    // TODO: error
+                    errorSink.error(token.loc, "invalid character literal `'c'`");
+                    errorSink.errorSupplimental("May be escaped `\\uXXXX` must be a UTF-16 code unit, two UTF-16 surrogates are supported");
                     return;
                 }
 
@@ -1579,7 +1578,8 @@ private:
                     }
 
             StringLiteralEscapeError:
-                    // TODO: error
+                    errorSink.error(token.loc, "invalid string literal `\"str\"`");
+                    errorSink.errorSupplimental("May be escaped `\\uXXXX` must be a UTF-16 code unit, two UTF-16 surrogates are supported");
                     return;
                 }
 
@@ -1591,7 +1591,9 @@ private:
                     currentCharacter--;
                     this.currentLocation.lineOffset--;
 
-                    if(isNewLineNext(this.currentCharacter) > 0) {
+                    if(*currentCharacter == 0) {
+                        return;
+                    } else if(isNewLineNext(this.currentCharacter) > 0) {
                         this.currentLocation.lineNumber++;
                         this.currentLocation.lineOffset = 1;
                         continue;
@@ -1610,10 +1612,10 @@ private:
                             lexIdentifier(token, currentCharacter - consumed, 0, 0, 0);
                             return;
                         }
-                    }
 
-                    // TODO: error
-                    return;
+                        errorSink.error(currentLocation, "invalid character `{:s}`(0x{:X})", decoded, cast(uint)decoded);
+                        return;
+                    }
                 }
             }
         }
@@ -1746,7 +1748,10 @@ private:
                     goto EscapeIdentifierError;
 
             EscapeIdentifierError:
-                // TODO: error
+                errorSink.error(token.loc, "invalid identifier");
+                errorSink.errorSupplimental("Expecting an identifier with a valid start, then zero or more valid continue characters.");
+                errorSink.errorSupplimental("May be escaped `\\uXXXX` which is a UTF-16 code unit, two may be used for surrogates.");
+                errorSink.errorSupplimental("A code unit may be escaped as `\\u{XXXXXX}`.");
                 return;
             } else {
                 size_t consumed, offset;
@@ -1879,7 +1884,9 @@ private:
         }
 
     EscapeSurrogateError:
-        // TODO: errors
+        errorSink.error(currentLocation, "invalid escaped UTF-16 surrogate in identifier");
+        errorSink.errorSupplimental("May be escaped `\\uXXXX` which is a UTF-16 code unit, two may be used for surrogates.");
+        errorSink.errorSupplimental("A code unit may be escaped as `\\u{XXXXXX}`.");
         return;
     }
 
@@ -1902,7 +1909,7 @@ private:
         }
 
         if(tooBig) {
-            // TODO: error
+            errorSink.error(token.loc, "binary number is too big");
             return;
         }
 
@@ -1929,7 +1936,7 @@ private:
         }
 
         if(tooBig) {
-            // TODO: error
+            errorSink.error(token.loc, "octal number is too big");
             return;
         }
 
@@ -1964,7 +1971,7 @@ private:
         }
 
         if(tooBig) {
-            // TODO: error
+            errorSink.error(token.loc, "hex number is too big");
             return;
         }
 
@@ -2113,22 +2120,11 @@ private:
 
                 if(asciiChar == '\\') {
                     ptr++;
-                    this.currentLocation.lineOffset++;
-
                     dchar decoded = parseEscape(ptr, buffer, usedOfBuffer);
                 } else if(asciiChar == '`' || (asciiChar == '$' && *(ptr + 1) == '{')) {
                     break;
                 } else {
                     const countChars = decodeLength(asciiChar);
-
-                    if(countChars == 1 && *ptr == '\n') {
-                        this.currentLocation.lineNumber++;
-                        this.currentLocation.lineOffset = 0;
-                    } else if(countChars == 4 && *ptr == 0xE2 && *(ptr + 1) == 0x80 && (*(ptr + 2) == 0xA8 || *(ptr + 2) == 0xA9)) {
-                        this.currentLocation.lineNumber++;
-                        this.currentLocation.lineOffset = 0;
-                    } else
-                        this.currentLocation.lineOffset++;
 
                     foreach(i; 0 .. countChars) {
                         buffer[usedOfBuffer++] = *(ptr + i);
@@ -2143,6 +2139,8 @@ private:
                 currentCharacter++;
                 this.currentCharacter++;
                 token.type = isHead ? Token.Type.String : Token.Type.TemplateSubstitutionTail;
+
+                this.inTemplate = false;
             } else if(*currentCharacter == '$' && *(currentCharacter + 1) == '{') {
                 // stop at ${
                 this.inTemplate = true;
@@ -2159,11 +2157,12 @@ private:
         }
 
     TemplateLiteralError:
-        // TODO: error;
+        errorSink.error(currentLocation, "invalid template literal character `{:s}`(0x{:X})", *currentCharacter,
+                cast(uint)*currentCharacter);
         return;
 
     TemplateLiteralEscapeError:
-        // TODO: error
+        errorSink.error(currentLocation, "invalid template literal escape");
         return;
     }
 
@@ -2481,7 +2480,7 @@ unittest {
     struct Check {
     static:
         Token testSuccess2(string filename, string contents, Token.Type expectedType, bool allowNext = false, bool allowRegex = false) {
-            ErrorSinkRef errorSink = ErrorSinkRef.make!ErrorSinkRef();
+            ErrorSinkRef errorSink = ErrorSinkRef.make!ErrorSinkRef_Console();
             assert(!errorSink.isNull);
             Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents), errorSink);
 
@@ -2601,7 +2600,7 @@ unittest {
             assert(texts.length > 1 && texts.length % 2 == 1);
             string filename = text(mod, ":", line);
 
-            ErrorSinkRef errorSink = ErrorSinkRef.make!ErrorSinkRef();
+            ErrorSinkRef errorSink = ErrorSinkRef.make!ErrorSinkRef_Console();
             assert(!errorSink.isNull);
             Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents), errorSink);
 
