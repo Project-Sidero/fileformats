@@ -1,6 +1,7 @@
 module sidero.fileformats.lexers.javascript;
 import sidero.fileformats.lexers.interning;
 import sidero.fileformats.lexers.defs;
+import sidero.fileformats.errors;
 import sidero.base.text;
 import sidero.base.text.unicode.characters.uax31;
 import sidero.base.math.bigint;
@@ -103,6 +104,8 @@ struct Lexer_Javascript {
 
         Lexer_Interning interning;
         String_UTF8 contentsStorage;
+
+        ErrorSinkRef errorSink;
 
         Loc currentLocation;
 
@@ -393,12 +396,15 @@ struct Lexer_Javascript {
 export @safe nothrow @nogc:
 
     ///
-    this(String_UTF8 fileName, String_UTF8 contents) scope @trusted {
+    this(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSink) scope @trusted {
         if(!contents.isPtrNullTerminated)
             contents = contents.dup;
 
         this.currentLocation = Loc(fileName, 1, 1);
         this.contentsStorage = contents;
+
+        this.errorSink = errorSink;
+        assert(!this.errorSink.isNull);
 
         auto text = contents.unsafeGetLiteral();
         if(text !is null) {
@@ -2475,18 +2481,20 @@ unittest {
     struct Check {
     static:
         Token testSuccess2(string filename, string contents, Token.Type expectedType, bool allowNext = false, bool allowRegex = false) {
-            Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents));
+            ErrorSinkRef errorSink = ErrorSinkRef.make!ErrorSinkRef();
+            assert(!errorSink.isNull);
+            Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents), errorSink);
 
             auto got = lexer.token(allowRegex);
 
-            if(got.type != expectedType) {
+            if(errorSink.haveError || got.type != expectedType) {
                 debugWriteln(got);
                 assert(0);
             }
 
             lexer.popFront();
 
-            if(!allowNext && lexer.front != Token.Type.EndOfFile) {
+            if(errorSink.haveError || (!allowNext && lexer.front != Token.Type.EndOfFile)) {
                 debugWriteln(lexer.token);
                 assert(0);
             }
@@ -2593,17 +2601,19 @@ unittest {
             assert(texts.length > 1 && texts.length % 2 == 1);
             string filename = text(mod, ":", line);
 
-            Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents));
+            ErrorSinkRef errorSink = ErrorSinkRef.make!ErrorSinkRef();
+            assert(!errorSink.isNull);
+            Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents), errorSink);
 
             {
                 auto got = lexer.token;
 
-                if(got.type != Token.Type.TemplateSubstitutionHead) {
+                if(errorSink.haveError || got.type != Token.Type.TemplateSubstitutionHead) {
                     debugWriteln(got);
                     assert(0);
                 }
 
-                if(got.text != texts[0]) {
+                if(errorSink.haveError || got.text != texts[0]) {
                     debugWriteln(got);
                     assert(0);
                 }
@@ -2615,12 +2625,12 @@ unittest {
                 {
                     auto got = lexer.token;
 
-                    if(got.type != Token.Type.Identifier) {
+                    if(errorSink.haveError || got.type != Token.Type.Identifier) {
                         debugWriteln(got);
                         assert(0);
                     }
 
-                    if(got.text != texts[i]) {
+                    if(errorSink.haveError || got.text != texts[i]) {
                         debugWriteln(got, texts[i]);
                         assert(0);
                     }
@@ -2631,12 +2641,12 @@ unittest {
                 {
                     auto got = lexer.token;
 
-                    if(got.type != Token.Type.TemplateSubstitutionMiddle) {
+                    if(errorSink.haveError || got.type != Token.Type.TemplateSubstitutionMiddle) {
                         debugWriteln(got);
                         assert(0);
                     }
 
-                    if(got.text != texts[i + 1]) {
+                    if(errorSink.haveError || got.text != texts[i + 1]) {
                         debugWriteln(got, texts[i + 1]);
                         assert(0);
                     }
@@ -2648,12 +2658,12 @@ unittest {
             {
                 auto got = lexer.token;
 
-                if(got.type != Token.Type.Identifier) {
+                if(errorSink.haveError || got.type != Token.Type.Identifier) {
                     debugWriteln(got);
                     assert(0);
                 }
 
-                if(got.text != texts[$ - 2]) {
+                if(errorSink.haveError || got.text != texts[$ - 2]) {
                     debugWriteln(got, texts[$ - 2]);
                     assert(0);
                 }
@@ -2664,12 +2674,12 @@ unittest {
             {
                 auto got = lexer.token;
 
-                if(got.type != Token.Type.TemplateSubstitutionTail) {
+                if(errorSink.haveError || got.type != Token.Type.TemplateSubstitutionTail) {
                     debugWriteln(got);
                     assert(0);
                 }
 
-                if(got.text != texts[$ - 1]) {
+                if(errorSink.haveError || got.text != texts[$ - 1]) {
                     debugWriteln(got, texts[$ - 1]);
                     assert(0);
                 }
@@ -2677,7 +2687,7 @@ unittest {
                 lexer.popFront();
             }
 
-            if(lexer.front != Token.Type.EndOfFile) {
+            if(errorSink.haveError || lexer.front != Token.Type.EndOfFile) {
                 debugWriteln(lexer.token);
                 assert(0);
             }
