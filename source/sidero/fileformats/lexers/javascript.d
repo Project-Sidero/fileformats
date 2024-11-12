@@ -116,17 +116,19 @@ struct Lexer_Javascript {
     ///
     static struct Token {
         ///
-        Loc loc;
-        ///
         Type type;
 
         ///
-        String_UTF8 text;
-        ///
-        DynamicBigInteger bigInteger;
+        Loc loc;
 
         ///
         union {
+            ///
+            String_UTF8 text;
+
+            ///
+            DynamicBigInteger bigInteger;
+
             ///
             double number;
 
@@ -171,11 +173,68 @@ struct Lexer_Javascript {
 
     export @safe nothrow @nogc:
 
-        this(return scope ref Token other) scope {
-            this.tupleof = other.tupleof;
+        this(return scope ref Token other) scope @trusted {
+            this.type = other.type;
+            this.loc = other.loc;
+
+            final switch(other.type) {
+            case Type.EndOfFile:
+                return;
+
+            case Type.Punctuation:
+                this.punctuation = other.punctuation;
+                return;
+
+            case Type.Character:
+                this.character = other.character;
+                return;
+
+            case Type.HashBangComment:
+            case Type.SingleLineComment:
+            case Type.MultiLineComment:
+            case Type.Identifier:
+            case Type.String:
+            case Type.RegexString:
+            case Type.TemplateSubstitutionHead:
+            case Type.TemplateSubstitutionMiddle:
+            case Type.TemplateSubstitutionTail:
+                this.text = other.text;
+                return;
+
+            case Type.Number:
+                this.number = other.number;
+                return;
+
+            case Type.BigInteger:
+                this.bigInteger = other.bigInteger;
+                return;
+            }
         }
 
-        ~this() scope {
+        ~this() scope @trusted {
+            final switch(this.type) {
+                case Type.EndOfFile:
+                case Type.Punctuation:
+                case Type.Character:
+                case Type.Number:
+                    return;
+
+                case Type.HashBangComment:
+                case Type.SingleLineComment:
+                case Type.MultiLineComment:
+                case Type.Identifier:
+                case Type.String:
+                case Type.RegexString:
+                case Type.TemplateSubstitutionHead:
+                case Type.TemplateSubstitutionMiddle:
+                case Type.TemplateSubstitutionTail:
+                    this.text.destroy;
+                    return;
+
+                case Type.BigInteger:
+                    this.bigInteger.destroy;
+                    return;
+            }
         }
 
         void opAssign(return scope Token other) scope {
