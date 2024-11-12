@@ -70,19 +70,36 @@ Tokens:
 
 - template literal
 
-Missing: regular expressions
+- regular expression
+     / start next? / flags
+     flags: (Continue | $)*
+     start:
+        [ ClassChar* ]
+        BackSlashSeq
+        not-line-terminator but not * \ / [
+     next:
+        [ ClassChar* ]
+        BackSlashSeq
+        not-line-terminator but not \ / [
+     ClassChar:
+        BackSlashSeq
+        not-line-terminator
+    BackSlashSeq: \ not-line-terminator
 +/
 
 /**
 For identifiers is UAX31 compliant.
 
 For numbers, negation is not handled due to not having the ability to determine between unary and binary.
+
+Regex literals must be enabled by passing a boolean flag to the front/token/peek/peek2 methods.
 */
 struct Lexer_Javascript {
     private {
         import sidero.fileformats.internal.smallarray;
 
         Token[3] tokens;
+        const(char)*[3] fileOffsetsGivenToken;
 
         Lexer_Interning interning;
         String_UTF8 contentsStorage;
@@ -90,7 +107,7 @@ struct Lexer_Javascript {
         Loc currentLocation;
 
         const(char)* startOfFile, currentCharacter, endOfFile;
-        ushort haveTokens;
+        size_t haveTokens;
 
         bool hitError;
         bool inTemplate, inTemplateSubstitution;
@@ -138,6 +155,8 @@ struct Lexer_Javascript {
             Character,
             ///
             String,
+            ///
+            RegexString,
             ///
             TemplateSubstitutionHead,
             ///
@@ -394,12 +413,12 @@ export @safe nothrow @nogc:
 
     ///
     bool empty() scope const {
-        return front() == Token.Type.EndOfFile;
+        return this.haveTokens == 0 || this.tokens[0].type == Token.Type.EndOfFile;
     }
 
     ///
-    Token.Type front() scope const {
-        assert(this.haveTokens > 0);
+    Token.Type front(bool regexAllowed = false) scope {
+        fillToken(0, regexAllowed);
         return tokens[0].type;
     }
 
@@ -408,57 +427,81 @@ export @safe nothrow @nogc:
         if(this.haveTokens > 1) {
             foreach(i, v; this.tokens) {
                 this.tokens[i - 1] = v;
+                this.fileOffsetsGivenToken[i - 1] = this.fileOffsetsGivenToken[i];
             }
 
             this.haveTokens--;
         } else {
             this.haveTokens--;
-            fillToken(0);
+            fillToken(0, false);
         }
     }
 
     ///
-    Token token() return scope {
-        fillToken(0);
-        assert(this.haveTokens > 0);
+    Token token(bool regexAllowed = false) return scope {
+        fillToken(0, regexAllowed);
         return this.tokens[0];
     }
 
     ///
-    Token.Type peek() scope {
+    Token.Type peek(bool regexAllowed = false) scope {
         fillToken(0);
-        fillToken(1);
+        fillToken(1, regexAllowed);
         assert(this.haveTokens > 1);
         return this.tokens[1].type;
     }
 
     ///
-    Token.Type peek2() scope {
+    Token.Type peek2(bool regexAllowed = false) scope {
         fillToken(0);
         fillToken(1);
-        fillToken(2);
+        fillToken(2, regexAllowed);
         assert(this.haveTokens > 2);
         return this.tokens[2].type;
     }
 
 private:
-    void fillToken(size_t tokenOffset) scope {
-        if(this.haveTokens > tokenOffset)
+    void fillToken(size_t tokenOffset, bool regexAllowed = false) scope @trusted {
+        if(this.haveTokens > tokenOffset) {
+            if(regexAllowed) {
+                if(this.tokens[tokenOffset].type == Token.Type.Punctuation && this.tokens[tokenOffset].punctuation == '/') {
+                    // need to rescan from this point on.
+                    this.haveTokens = tokenOffset;
+
+                    this.currentCharacter = this.fileOffsetsGivenToken[tokenOffset];
+                    this.currentLocation = this.tokens[tokenOffset].loc;
+
+                    scan(this.tokens[tokenOffset], this.fileOffsetsGivenToken[tokenOffset], true);
+                    this.haveTokens++;
+                }
+            } else if(this.tokens[tokenOffset].type == Token.Type.RegexString) {
+                // Swap the regex string token for punctuation /
+
+                this.tokens[tokenOffset].type = Token.Type.Punctuation;
+                this.tokens[tokenOffset].punctuation = '/';
+
+                this.haveTokens = tokenOffset + 1;
+                this.currentCharacter = this.fileOffsetsGivenToken[tokenOffset] + 1;
+                this.currentLocation = this.tokens[tokenOffset].loc;
+                this.currentLocation.lineOffset++;
+            }
+
             return;
+        }
 
         this.tokens[tokenOffset] = Token.init;
 
         if(tokenOffset == 0) {
-            scan(this.tokens[0]);
+            scan(this.tokens[0], this.fileOffsetsGivenToken[tokenOffset], regexAllowed);
             this.haveTokens = 1;
         } else {
             assert(this.haveTokens == tokenOffset);
-            scan(this.tokens[this.haveTokens]);
+            scan(this.tokens[tokenOffset], this.fileOffsetsGivenToken[tokenOffset], regexAllowed);
             this.haveTokens++;
         }
     }
 
-    void scan(scope ref Token token) scope @trusted {
+    void scan(scope out Token token, scope ref const(char)* startOfTokenOffsetPtr, bool regexAllowed) scope @trusted {
         if(this.inTemplate) {
             // https://262.ecma-international.org/15.0/index.html#prod-TemplateSubstitutionTail
 
@@ -469,18 +512,19 @@ private:
                     currentCharacter++;
                     this.currentLocation.lineOffset++;
                 } else
-                    return scanActual(token);
+                    return scanActual(token, startOfTokenOffsetPtr, regexAllowed);
             }
 
             // identical to head except its TemplateSubstitutionMiddle if ends with ${
             // otherwise its TemplateSubstitutionTail if it ends with `
 
+            startOfTokenOffsetPtr = currentCharacter;
             parseTemplateLiteralBegin(token, false);
         } else
-            scanActual(token);
+            scanActual(token, startOfTokenOffsetPtr, regexAllowed);
     }
 
-    void scanActual(scope ref Token token) scope @trusted {
+    void scanActual(scope ref Token token, scope ref const(char)* startOfTokenOffsetPtr, bool regexAllowed) scope @trusted {
         import sidero.base.encoding.utf : decode, decodeLength;
         import sidero.base.text.unicode.characters.database;
 
@@ -491,7 +535,18 @@ private:
         if(this.hitError)
             return;
 
+        size_t isNewLineNext(scope ref const(char)* ptr) {
+            if(*ptr == '\n') {
+                return 1;
+            } else if(*ptr == 0xE2 && *(ptr + 1) == 0x80 && (*(ptr + 2) == 0xA8 || *(ptr + 2) == 0xA9)) {
+                return 3;
+            } else
+                return 0;
+        }
+
         while(currentCharacter < endOfFile) {
+            startOfTokenOffsetPtr = currentCharacter;
+
             char asciiChar = *currentCharacter;
             currentCharacter++;
 
@@ -1112,15 +1167,208 @@ private:
                         return;
                     }
 
-                    // punctuation
-                    token.type = Token.Type.Punctuation;
+                    if(regexAllowed) {
+                        /*
+                        - regular expression
+                             / start next? / flags
+                             flags: (Continue | $)*
 
-                    if(*currentCharacter == '=') {
-                        currentCharacter++;
-                        this.currentLocation.lineOffset++;
-                        token.punctuation = PunctuationChars.DivideAssign;
-                    } else
-                        token.punctuation = asciiChar;
+                             next:
+                                [ ClassChar* ]
+                                BackSlashSeq
+                                not-line-terminator but not \ / [
+                             ClassChar:
+                                BackSlashSeq
+                                not-line-terminator
+                            BackSlashSeq: \ not-line-terminator
+                        */
+                        const(char)* startToken = currentCharacter - 1;
+
+                        {
+                            // start
+
+                            if(*currentCharacter == '\\') {
+                                // BackSlashSeq: \ not-line-terminator
+
+                                this.currentCharacter++;
+                                this.currentLocation.lineOffset++;
+
+                                if(isNewLineNext(this.currentCharacter))
+                                    goto RegexStartError;
+
+                                const countChars = decodeLength(*currentCharacter);
+                                this.currentCharacter += countChars;
+                                this.currentLocation.lineOffset++;
+                            } else if(*currentCharacter == '[') {
+                                // [ ClassChar* ]
+                                // ClassChar:
+                                //     BackSlashSeq
+                                //     not-line-terminator
+                                // BackSlashSeq: \ not-line-terminator
+
+                                this.currentCharacter++;
+                                this.currentLocation.lineOffset++;
+
+                                while(currentCharacter < endOfFile) {
+                                    if(*currentCharacter == ']')
+                                        break;
+
+                                    if(*currentCharacter == '\\') {
+                                        this.currentCharacter++;
+                                        this.currentLocation.lineOffset++;
+                                    }
+
+                                    if(isNewLineNext(this.currentCharacter))
+                                        goto RegexStartError;
+
+                                    const countChars = decodeLength(*currentCharacter);
+                                    this.currentCharacter += countChars;
+                                    this.currentLocation.lineOffset++;
+                                }
+
+                                if(*currentCharacter != ']')
+                                    goto RegexStartError;
+
+                                this.currentCharacter++;
+                                this.currentLocation.lineOffset++;
+                            } else {
+                                // not-line-terminator but not * \ / [
+                                if(isNewLineNext(this.currentCharacter))
+                                    goto RegexStartError;
+
+                                const countChars = decodeLength(*currentCharacter);
+                                this.currentCharacter += countChars;
+                                this.currentLocation.lineOffset++;
+                            }
+                        }
+
+                        {
+                            /*
+                            next:
+                                [ ClassChar* ]
+                                BackSlashSeq
+                                not-line-terminator but not \ / [
+                            */
+
+                            while(currentCharacter < endOfFile) {
+                                if(*currentCharacter == '/')
+                                    break;
+                                else if(*currentCharacter == '[') {
+                                    // [ ClassChar* ]
+                                    // ClassChar:
+                                    //     BackSlashSeq
+                                    //     not-line-terminator
+                                    // BackSlashSeq: \ not-line-terminator
+
+                                    this.currentCharacter++;
+                                    this.currentLocation.lineOffset++;
+
+                                    while(currentCharacter < endOfFile) {
+                                        if(*currentCharacter == ']')
+                                            break;
+
+                                        if(*currentCharacter == '\\') {
+                                            this.currentCharacter++;
+                                            this.currentLocation.lineOffset++;
+                                        }
+
+                                        if(isNewLineNext(this.currentCharacter))
+                                            goto RegexNextError;
+
+                                        const countChars = decodeLength(*currentCharacter);
+                                        this.currentCharacter += countChars;
+                                        this.currentLocation.lineOffset++;
+                                    }
+
+                                    if(*currentCharacter != ']')
+                                        goto RegexNextError;
+
+                                    this.currentCharacter++;
+                                    this.currentLocation.lineOffset++;
+                                } else {
+                                    // not-line-terminator but not \ / [
+                                    // BackSlashSeq: \ not-line-terminator
+
+                                    if(*currentCharacter == '\\') {
+                                        this.currentCharacter++;
+                                        this.currentLocation.lineOffset++;
+                                    }
+
+                                    if(isNewLineNext(this.currentCharacter))
+                                        goto RegexNextError;
+
+                                    const countChars = decodeLength(*currentCharacter);
+                                    this.currentCharacter += countChars;
+                                    this.currentLocation.lineOffset++;
+                                }
+                            }
+                        }
+
+                        {
+                            if(*currentCharacter != '/')
+                                goto RegexEndError;
+
+                            this.currentCharacter++;
+                            this.currentLocation.lineOffset++;
+
+                            // flags: (Continue | $)*
+                            while(currentCharacter < endOfFile) {
+                                if(*currentCharacter == '$') {
+                                    this.currentCharacter++;
+                                    this.currentLocation.lineOffset++;
+                                } else {
+                                    asciiChar = *currentCharacter;
+
+                                    if((asciiChar >= 'a' && asciiChar <= 'z') || (asciiChar >= 'A' && asciiChar <= 'Z') ||
+                                            (asciiChar >= '0' && asciiChar <= '9') || asciiChar == '_') {
+                                        this.currentCharacter++;
+                                        this.currentLocation.lineOffset++;
+                                        continue;
+                                    } else {
+                                        size_t consumed, offset;
+                                        dchar decoded = decode(() @trusted {
+                                            return currentCharacter + offset >= (endOfFile + 1);
+                                        }, () @trusted { return cast(char)*(currentCharacter + offset); }, () {
+                                            offset++;
+                                        }, consumed);
+
+                                        if(isUAX31_Javascript_Continue(decoded)) {
+                                            this.currentCharacter += consumed;
+                                            this.currentLocation.lineOffset++;
+                                            continue;
+                                        } else
+                                            break;
+                                    }
+                                }
+                            }
+
+                            token.type = Token.Type.RegexString;
+                            token.text = String_UTF8(startToken[0 .. currentCharacter - startToken]).dup;
+                        }
+                    } else {
+                        // punctuation
+                        token.type = Token.Type.Punctuation;
+
+                        if(*currentCharacter == '=') {
+                            currentCharacter++;
+                            this.currentLocation.lineOffset++;
+                            token.punctuation = PunctuationChars.DivideAssign;
+                        } else
+                            token.punctuation = asciiChar;
+                    }
+
+                    return;
+
+            RegexStartError:
+                    // TODO: error
+                    return;
+
+            RegexNextError:
+                    // TODO: error
+                    return;
+
+            RegexEndError:
+                    // TODO: error
                     return;
                 }
 
@@ -1150,16 +1398,11 @@ private:
                     } else {
                         const countChars = decodeLength(asciiChar);
 
-                        if(countChars == 1 && *currentCharacter == '\n') {
+                        if(isNewLineNext(this.currentCharacter) > 0) {
                             this.currentLocation.lineNumber++;
-                            this.currentLocation.lineOffset = 0;
-                        } else if(countChars == 4 && *currentCharacter == 0xE2 && *(currentCharacter + 1) == 0x80 &&
-                                (*(currentCharacter + 2) == 0xA8 || *(currentCharacter + 2) == 0xA9)) {
-                            this.currentLocation.lineNumber++;
-                            this.currentLocation.lineOffset = 0;
-                        } else {
+                            this.currentLocation.lineOffset = 1;
+                        } else
                             this.currentLocation.lineOffset++;
-                        }
 
                         if(*(currentCharacter + countChars) != '\'')
                             goto CharacterLiteralError;
@@ -1208,13 +1451,9 @@ private:
                         } else {
                             const countChars = decodeLength(asciiChar);
 
-                            if(countChars == 1 && *currentCharacter == '\n') {
+                            if(isNewLineNext(this.currentCharacter) > 0) {
                                 this.currentLocation.lineNumber++;
-                                this.currentLocation.lineOffset = 0;
-                            } else if(countChars == 4 && *currentCharacter == 0xE2 && *(currentCharacter + 1) == 0x80 &&
-                                    (*(currentCharacter + 2) == 0xA8 || *(currentCharacter + 2) == 0xA9)) {
-                                this.currentLocation.lineNumber++;
-                                this.currentLocation.lineOffset = 0;
+                                this.currentLocation.lineOffset = 1;
                             } else
                                 this.currentLocation.lineOffset++;
 
@@ -1245,16 +1484,13 @@ private:
                             } else if(asciiChar == '\"') {
                                 break;
                             } else {
-                                const countChars = decodeLength(asciiChar);
-
-                                if(countChars == 1 && *ptr == '\n') {
+                                if(isNewLineNext(ptr) > 0) {
                                     this.currentLocation.lineNumber++;
-                                    this.currentLocation.lineOffset = 0;
-                                } else if(countChars == 4 && *ptr == 0xE2 && *(ptr + 1) == 0x80 && (*(ptr + 2) == 0xA8 || *(ptr + 2) == 0xA9)) {
-                                    this.currentLocation.lineNumber++;
-                                    this.currentLocation.lineOffset = 0;
+                                    this.currentLocation.lineOffset = 1;
                                 } else
                                     this.currentLocation.lineOffset++;
+
+                                const countChars = decodeLength(asciiChar);
 
                                 foreach(i; 0 .. countChars) {
                                     buffer[usedOfBuffer++] = *(ptr + i);
@@ -1282,23 +1518,25 @@ private:
                     currentCharacter--;
                     this.currentLocation.lineOffset--;
 
-                    size_t consumed, offset;
-                    dchar decoded = decode(() @trusted { return currentCharacter + offset >= endOfFile; }, () @trusted {
-                        return cast(char)*(currentCharacter + offset);
-                    }, () { offset++; }, consumed);
-
-                    if(decoded == '\u2028' || decoded == '\u2029') {
+                    if(isNewLineNext(this.currentCharacter) > 0) {
                         this.currentLocation.lineNumber++;
                         this.currentLocation.lineOffset = 1;
                         continue;
-                    } else if(decoded == '\uFEFF' || getGeneralCategory(decoded) == GeneralCategory.Zs) {
-                        this.currentLocation.lineOffset++;
-                        continue;
-                    } else if(isUAX31_Javascript_Start(decoded)) {
-                        this.currentCharacter += consumed;
-                        this.currentLocation.lineOffset++;
-                        lexIdentifier(token, currentCharacter - consumed, 0, 0, 0);
-                        return;
+                    } else {
+                        size_t consumed, offset;
+                        dchar decoded = decode(() @trusted { return currentCharacter + offset >= endOfFile; }, () @trusted {
+                            return cast(char)*(currentCharacter + offset);
+                        }, () { offset++; }, consumed);
+
+                        if(decoded == '\uFEFF' || getGeneralCategory(decoded) == GeneralCategory.Zs) {
+                            this.currentLocation.lineOffset++;
+                            continue;
+                        } else if(isUAX31_Javascript_Start(decoded)) {
+                            this.currentCharacter += consumed;
+                            this.currentLocation.lineOffset++;
+                            lexIdentifier(token, currentCharacter - consumed, 0, 0, 0);
+                            return;
+                        }
                     }
 
                     // TODO: error
@@ -2169,10 +2407,10 @@ unittest {
 
     struct Check {
     static:
-        Token testSuccess2(string filename, string contents, Token.Type expectedType, bool allowNext = false) {
+        Token testSuccess2(string filename, string contents, Token.Type expectedType, bool allowNext = false, bool allowRegex = false) {
             Lexer_Javascript lexer = Lexer_Javascript(String_UTF8(filename), String_UTF8(contents));
 
-            auto got = lexer.token;
+            auto got = lexer.token(allowRegex);
 
             if(got.type != expectedType) {
                 debugWriteln(got);
@@ -2189,8 +2427,9 @@ unittest {
             return got;
         }
 
-        Token testSuccess(string mod = __MODULE__, int line = __LINE__)(string contents, Token.Type expectedType, bool allowNext = false) {
-            return testSuccess2(text(mod, ":", line), contents, expectedType, allowNext);
+        Token testSuccess(string mod = __MODULE__, int line = __LINE__)(string contents, Token.Type expectedType,
+                bool allowNext = false, bool allowRegex = false) {
+            return testSuccess2(text(mod, ":", line), contents, expectedType, allowNext, allowRegex);
         }
 
         void testSuccessIdentifier(string mod = __MODULE__, int line = __LINE__)(string contents, string expected) {
@@ -2376,6 +2615,17 @@ unittest {
                 assert(0);
             }
         }
+
+        void testSuccessRegexString(string mod = __MODULE__, int line = __LINE__)(string contents) {
+            import sidero.base.math.utils;
+
+            Lexer_Javascript.Token token = testSuccess!(mod, line)(contents, Token.Type.RegexString, false, true);
+
+            if(token.text != contents) {
+                debugWriteln(token, contents);
+                assert(0);
+            }
+        }
     }
 
     Check.testSuccessIdentifier("$h_el9lo5", "$h_el9lo5");
@@ -2514,7 +2764,7 @@ unittest {
     Check.testSuccessPunctuation("/ /", '/', true);
 
     // Multi-char punctuation
-    static foreach(m; __traits(allMembers, Lexer_Javascript.PunctuationChars)[0 .. $-1]) {
+    static foreach(m; __traits(allMembers, Lexer_Javascript.PunctuationChars)[0 .. $ - 1]) {
         Check.testSuccessPunctuation(Lexer_Javascript.punctuationToText(__traits(getMember,
                 Lexer_Javascript.PunctuationChars, m)), __traits(getMember, Lexer_Javascript.PunctuationChars, m));
     }
@@ -2551,4 +2801,24 @@ unittest {
     Check.testSuccessTemplateString("`b${ident}e`", "b", "ident", "e");
     Check.testSuccessTemplateString("`b${ident}mi${another}e`", "b", "ident", "mi", "another", "e");
     Check.testSuccessTemplateString("`b${ident}mi${another}but${tok}e`", "b", "ident", "mi", "another", "but", "tok", "e");
+
+    // regex string
+    Check.testSuccessRegexString("/a/");
+    Check.testSuccessRegexString("/\\a/");
+    Check.testSuccessRegexString("/[a]/");
+
+    Check.testSuccessRegexString("/ab/");
+    Check.testSuccessRegexString("/\\a\\b/");
+    Check.testSuccessRegexString("/[a][b]/");
+
+    Check.testSuccessRegexString("/oops I did\\/ it again/");
+
+    // regex string flags
+    Check.testSuccessRegexString("/a/c");
+    Check.testSuccessRegexString("/a/$");
+
+    Check.testSuccessRegexString("/ab/c");
+    Check.testSuccessRegexString("/ab/$");
+
+    Check.testSuccessRegexString("/oops I did\\/ it again/vali$d");
 }
