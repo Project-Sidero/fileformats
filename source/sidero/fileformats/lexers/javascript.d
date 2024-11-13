@@ -157,8 +157,6 @@ struct Lexer_Javascript {
             ///
             Punctuation,
             ///
-            Character,
-            ///
             String,
             ///
             RegexString,
@@ -188,10 +186,6 @@ struct Lexer_Javascript {
                 this.punctuation = other.punctuation;
                 return;
 
-            case Type.Character:
-                this.character = other.character;
-                return;
-
             case Type.HashBangComment:
             case Type.SingleLineComment:
             case Type.MultiLineComment:
@@ -218,7 +212,6 @@ struct Lexer_Javascript {
             final switch(this.type) {
             case Type.EndOfFile:
             case Type.Punctuation:
-            case Type.Character:
             case Type.Number:
                 return;
 
@@ -1447,65 +1440,9 @@ private:
                     return;
                 }
 
-            case '\'': {
-                    asciiChar = *currentCharacter;
-
-                    if(asciiChar == '\\') {
-                        currentCharacter++;
-                        this.currentLocation.lineOffset++;
-
-                        size_t consumed, given;
-
-                        const(char)* startToken = currentCharacter;
-
-                        if(!skipEscape(consumed, given))
-                            goto CharacterLiteralError;
-
-                        if(*currentCharacter != '\'')
-                            goto CharacterLiteralError;
-                        this.currentCharacter++;
-                        this.currentLocation.lineOffset++;
-
-                        token.type = Token.Type.Character;
-                        token.character = parseEscape(startToken, null, consumed);
-                    } else if(asciiChar == '\'') {
-                        goto CharacterLiteralError;
-                    } else {
-                        const countChars = decodeLength(asciiChar);
-
-                        if(isNewLineNext(this.currentCharacter) > 0) {
-                            this.currentLocation.lineNumber++;
-                            this.currentLocation.lineOffset = 1;
-                        } else
-                            this.currentLocation.lineOffset++;
-
-                        if(*(currentCharacter + countChars) != '\'')
-                            goto CharacterLiteralError;
-
-                        currentCharacter += countChars + 1;
-                        token.type = Token.Type.Character;
-
-                        if(countChars == 1) {
-                            token.character = asciiChar;
-                        } else {
-                            size_t consumed, offset;
-                            dchar decoded = decode(() @trusted { return currentCharacter + offset >= endOfFile; }, () @trusted {
-                                return cast(char)*(currentCharacter + offset);
-                            }, () { offset++; }, consumed);
-
-                            token.character = decoded;
-                        }
-                    }
-
-                    return;
-
-            CharacterLiteralError:
-                    errorSink.error(token.loc, "invalid character literal `'c'`");
-                    errorSink.errorSupplimental("May be escaped `\\uXXXX` must be a UTF-16 code unit, two UTF-16 surrogates are supported");
-                    return;
-                }
-
+            case '\'':
             case '\"': {
+                    char endOfTokenCharacter = asciiChar;
                     const(char)* startToken = currentCharacter;
                     size_t consumed, given;
 
@@ -1518,7 +1455,7 @@ private:
 
                             if(!skipEscape(consumed, given))
                                 goto StringLiteralEscapeError;
-                        } else if(asciiChar == '\"') {
+                        } else if(asciiChar == endOfTokenCharacter) {
                             break;
                         } else {
                             const countChars = decodeLength(asciiChar);
@@ -1533,7 +1470,7 @@ private:
                         }
                     }
 
-                    if(*currentCharacter != '\"')
+                    if(*currentCharacter != endOfTokenCharacter)
                         goto StringLiteralEscapeError;
                     currentCharacter++;
                     this.currentLocation.lineOffset++;
@@ -1553,7 +1490,7 @@ private:
                                 this.currentLocation.lineOffset++;
 
                                 dchar decoded = parseEscape(ptr, buffer, usedOfBuffer);
-                            } else if(asciiChar == '\"') {
+                            } else if(asciiChar == endOfTokenCharacter) {
                                 break;
                             } else {
                                 if(isNewLineNext(ptr) > 0) {
@@ -1578,7 +1515,7 @@ private:
                     }
 
             StringLiteralEscapeError:
-                    errorSink.error(token.loc, "invalid string literal `\"str\"`");
+                    errorSink.error(token.loc, "invalid string literal `\"str\"` or `'str'`");
                     errorSink.errorSupplimental("May be escaped `\\uXXXX` must be a UTF-16 code unit, two UTF-16 surrogates are supported");
                     return;
                 }
@@ -2574,17 +2511,6 @@ unittest {
             }
         }
 
-        void testSuccessCharacter(string mod = __MODULE__, int line = __LINE__)(string contents, dchar expected) {
-            import sidero.base.math.utils;
-
-            Lexer_Javascript.Token token = testSuccess!(mod, line)(contents, Token.Type.Character);
-
-            if(token.character != expected) {
-                debugWriteln(token, token.character);
-                assert(0);
-            }
-        }
-
         void testSuccessString(string mod = __MODULE__, int line = __LINE__)(string contents, string expected) {
             import sidero.base.math.utils;
 
@@ -2854,16 +2780,16 @@ unittest {
     Check.testSuccessMultiLineComment("/* some text*/\r\n", " some text");
     Check.testSuccessMultiLineComment("/* some text*/\n", " some text");
 
-    // characters
-    Check.testSuccessCharacter("'a'", 'a');
-    Check.testSuccessCharacter("'\n'", '\n');
-    Check.testSuccessCharacter("'\\n'", '\n');
-    Check.testSuccessCharacter("'\\b'", '\b');
-    Check.testSuccessCharacter("'\\u0053'", 'S');
-    Check.testSuccessCharacter("'\\u{000054}'", 'T');
-    Check.testSuccessCharacter("'\\uD835\\uDD04'", '\U0001D504');
+    // single quote string
+    Check.testSuccessString("'bae'", "bae");
+    Check.testSuccessString("'b\ne'", "b\ne");
+    Check.testSuccessString("'b\\ne'", "b\ne");
+    Check.testSuccessString("'b\\be'", "b\be");
+    Check.testSuccessString("'b\\u0053e'", "bSe");
+    Check.testSuccessString("'b\\u{000054}e'", "bTe");
+    Check.testSuccessString("'b\\uD835\\uDD04e'", "b\U0001D504e");
 
-    // strings
+    // double quote strings
     Check.testSuccessString("\"bae\"", "bae");
     Check.testSuccessString("\"b\ne\"", "b\ne");
     Check.testSuccessString("\"b\\ne\"", "b\ne");
