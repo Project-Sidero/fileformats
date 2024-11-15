@@ -15,6 +15,8 @@ import sidero.base.allocators;
 import sidero.base.text;
 import sidero.base.math.bigint;
 import sidero.base.containers.dynamicarray;
+import sidero.base.containers.readonlyslice;
+import sidero.base.containers.list.linkedlist;
 import sidero.base.attributes;
 
 /// Wrapper around the types that JSON supports as a value, along with comments.
@@ -30,7 +32,7 @@ struct JSONValue {
             DynamicArray!String_UTF8 attachedComments;
 
             union {
-                JSONArray array;
+                LinkedList!JSONValue array;
                 JSONObject obj;
                 DynamicBigInteger bigInteger;
                 double number;
@@ -109,9 +111,8 @@ export @safe nothrow @nogc:
     void opAssign(double value) scope {
         if(isNull)
             return;
-        this.node.cleanup();
 
-        this.node.type = Type.Number;
+        this.resetTo(Type.Number);
         this.node.number = value;
     }
 
@@ -119,9 +120,8 @@ export @safe nothrow @nogc:
     void opAssign(DynamicBigInteger value) scope @trusted {
         if(isNull)
             return;
-        this.node.cleanup();
 
-        this.node.type = Type.BigInteger;
+        this.resetTo(Type.BigInteger);
         this.node.bigInteger = value;
     }
 
@@ -129,14 +129,38 @@ export @safe nothrow @nogc:
     void opAssign(String_UTF8 value) scope @trusted {
         if(isNull)
             return;
-        this.node.cleanup();
 
-        this.node.type = Type.Text;
+        this.resetTo(Type.Text);
         this.node.text = value;
     }
 
     ///
+    void opAssign(DynamicArray!JSONValue value) scope {
+        this.opAssign(value.asReadOnly());
+    }
+
+    ///
+    void opAssign(Slice!JSONValue value) scope @trusted {
+        if(isNull)
+            return;
+
+        this.resetTo(Type.Array);
+        this.node.array ~= value;
+    }
+
+    ///
+    void opAssign(LinkedList!JSONValue value) scope @trusted {
+        if(isNull)
+            return;
+
+        this.resetTo(Type.Array);
+        this.node.array ~= value;
+    }
+
+    ///
     void resetTo(Type type) scope @trusted {
+        import sidero.base.allocators.utils;
+
         if(isNull)
             return;
 
@@ -145,18 +169,22 @@ export @safe nothrow @nogc:
 
         final switch(type) {
         case Type.Array:
-            this.node.array = JSONArray.init;
+            fillUninitializedWithInit(this.node.array);
+            this.node.array = LinkedList!JSONValue(this.node.allocator);
             break;
         case Type.Object:
+            fillUninitializedWithInit(this.node.obj);
             this.node.obj = JSONObject.init;
             break;
         case Type.BigInteger:
+            fillUninitializedWithInit(this.node.bigInteger);
             this.node.bigInteger = DynamicBigInteger.init;
             break;
         case Type.Number:
             this.node.number = double.nan;
             break;
         case Type.Text:
+            fillUninitializedWithInit(this.node.text);
             this.node.text = String_UTF8.init;
             break;
         }
@@ -182,7 +210,7 @@ export @safe nothrow @nogc:
     }
 
     ///
-    void match(scope void delegate(JSONArray) @safe nothrow @nogc arrayDel,
+    void match(scope void delegate(LinkedList!JSONValue) @safe nothrow @nogc arrayDel,
             scope void delegate(JSONObject) @safe nothrow @nogc objectDel,
             scope void delegate(DynamicBigInteger) @safe nothrow @nogc bigIntegerDel,
             scope void delegate(double) @safe nothrow @nogc numberDel,
@@ -227,7 +255,7 @@ export @safe nothrow @nogc:
 
         final switch(type) {
         case Type.Array:
-            ret.node.array = JSONArray.init;
+            ret.node.array = LinkedList!JSONValue(allocator);
             break;
         case Type.Object:
             ret.node.obj = JSONObject.init;
@@ -299,9 +327,14 @@ export @safe nothrow @nogc:
 
         sink.formattedWrite("JSONValue(@{:p}, type={:s} =>", this.node, this.node.type);
 
-        this.match((JSONArray) {}, (JSONObject) {}, (DynamicBigInteger bigInteger) { sink.formattedWrite(" {:s}"); }, (double number) {
-            sink.formattedWrite(" {:s}", number);
-        }, (String_UTF8 text) { sink ~= "\n"; PrettyPrint pp = PrettyPrint.defaults; pp.useQuotes = true; pp(sink, text); });
+        this.match((LinkedList!JSONValue) {}, (JSONObject) {}, (DynamicBigInteger bigInteger) {
+            sink.formattedWrite(" {:s}");
+        }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
+            sink ~= "\n";
+            PrettyPrint pp = PrettyPrint.defaults;
+            pp.useQuotes = true;
+            pp(sink, text);
+        });
 
         if(this.haveAttachedComments()) {
             sink ~= ",\ncomments =>\n";
@@ -335,23 +368,28 @@ unittest {
     assert(!value.isNull);
 
     value = 42;
-    value.match((JSONArray) => assert(0), (JSONObject) => assert(0), (DynamicBigInteger) => assert(0),
-            (double number) => assert(isClose(number, 42)), (String_UTF8) => assert(0), ()=> assert(0));
+    value.match((LinkedList!JSONValue) => assert(0), (JSONObject) => assert(0), (DynamicBigInteger) => assert(0),
+            (double number) => assert(isClose(number, 42)), (String_UTF8) => assert(0), () => assert(0));
 
     value = DynamicBigInteger.parse("95");
-    value.match((JSONArray) => assert(0), (JSONObject) => assert(0),
+    value.match((LinkedList!JSONValue) => assert(0), (JSONObject) => assert(0),
             (DynamicBigInteger bigInteger) => assert(bigInteger == DynamicBigInteger.parse("95")),
-            (double) => assert(0), (String_UTF8) => assert(0), ()=> assert(0));
+            (double) => assert(0), (String_UTF8) => assert(0), () => assert(0));
 
     value = String_UTF8("Hi there!");
-    value.match((JSONArray) => assert(0), (JSONObject) => assert(0), (DynamicBigInteger) => assert(0),
-            (double) => assert(0), (String_UTF8 text) => assert(text == "Hi there!"), ()=> assert(0));
+    value.match((LinkedList!JSONValue) => assert(0), (JSONObject) => assert(0), (DynamicBigInteger) => assert(0),
+            (double) => assert(0), (String_UTF8 text) => assert(text == "Hi there!"), () => assert(0));
+
+    {
+        JSONValue temp;
+        temp = String_UTF8("Hi there!");
+
+        value = Slice!JSONValue(temp);
+        value.match((LinkedList!JSONValue array) => assert(array == temp), (JSONObject) => assert(0),
+                (DynamicBigInteger) => assert(0), (double) => assert(0), (String_UTF8) => assert(0), () => assert(0));
+    }
 
     assert(value.attachedComments() == [String_UTF8("Some comment goes here")]);
-}
-
-struct JSONArray {
-
 }
 
 struct JSONObject {
