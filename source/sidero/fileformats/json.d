@@ -1,15 +1,3 @@
-/**
-Memory life time strategy of this module is based upon unique ownership and moving of each value.
-
-```d
-JSONValue value = JSONValue.create(JSONValue.Type.Number);
-JSONValue nextValue = value;
-// value is JSONValue.init
-
-JSONValue nextValue2 = nextValue.acquire;
-// nextValue2 and nextValue are the same one, just in two different variables
-```
-*/
 module sidero.fileformats.json;
 import sidero.base.allocators;
 import sidero.base.text;
@@ -17,70 +5,22 @@ import sidero.base.math.bigint;
 import sidero.base.containers.dynamicarray;
 import sidero.base.containers.readonlyslice;
 import sidero.base.containers.list.linkedlist;
+import sidero.base.containers.map.hashmap;
 import sidero.base.attributes;
 
 /// Wrapper around the types that JSON supports as a value, along with comments.
 struct JSONValue {
     package(sidero.fileformats) @PrettyPrintIgnore @hidden {
-        Node* node;
-
-        static struct Node {
-            int refCount;
-            RCAllocator allocator;
-
-            Type type;
-            DynamicArray!String_UTF8 attachedComments;
-
-            union {
-                LinkedList!JSONValue array;
-                JSONObject obj;
-                DynamicBigInteger bigInteger;
-                double number;
-                String_UTF8 text;
-            }
-
-        @safe nothrow @nogc:
-
-             ~this() scope {
-                this.cleanup;
-            }
-
-            void cleanup() scope @trusted {
-                final switch(type) {
-                case Type.Array:
-                    this.array.destroy;
-                    break;
-                case Type.Object:
-                    this.obj.destroy;
-                    break;
-                case Type.BigInteger:
-                    this.bigInteger.destroy;
-                    break;
-                case Type.Number:
-                    break;
-                case Type.Text:
-                    this.text.destroy;
-                    break;
-                }
-            }
-
-            void rc(bool addRef) scope @trusted {
-                if(addRef) {
-                    refCount++;
-                } else if(refCount-- == 1) {
-                    // no longer known about
-                    RCAllocator allocator = this.allocator;
-                    allocator.dispose(&this);
-                }
-            }
-        }
+        JSONState* node;
     }
 
 export @safe nothrow @nogc:
 
     this(return scope ref JSONValue other) scope {
         this.node = other.node;
-        other.node = null;
+
+        if(this.node !is null)
+            this.node.rc(true);
     }
 
     ~this() scope {
@@ -158,6 +98,15 @@ export @safe nothrow @nogc:
     }
 
     ///
+    void opAssign(HashMap!(String_UTF8, JSONValue) value) scope @trusted {
+        if(isNull)
+            return;
+
+        this.resetTo(Type.Object);
+        this.node.obj = value;
+    }
+
+    ///
     void resetTo(Type type) scope @trusted {
         import sidero.base.allocators.utils;
 
@@ -174,11 +123,11 @@ export @safe nothrow @nogc:
             break;
         case Type.Object:
             fillUninitializedWithInit(this.node.obj);
-            this.node.obj = JSONObject.init;
+            this.node.obj = HashMap!(String_UTF8, JSONValue)(this.node.allocator);
             break;
         case Type.BigInteger:
             fillUninitializedWithInit(this.node.bigInteger);
-            this.node.bigInteger = DynamicBigInteger.init;
+            this.node.bigInteger = DynamicBigInteger(0);
             break;
         case Type.Number:
             this.node.number = double.nan;
@@ -211,8 +160,8 @@ export @safe nothrow @nogc:
 
     ///
     void match(scope void delegate(LinkedList!JSONValue) @safe nothrow @nogc arrayDel,
-            scope void delegate(JSONObject) @safe nothrow @nogc objectDel,
-            scope void delegate(DynamicBigInteger) @safe nothrow @nogc bigIntegerDel,
+            scope void delegate(HashMap!(String_UTF8, JSONValue)) @safe nothrow @nogc objectDel, scope void delegate(
+                DynamicBigInteger) @safe nothrow @nogc bigIntegerDel,
             scope void delegate(double) @safe nothrow @nogc numberDel,
             scope void delegate(String_UTF8) @safe nothrow @nogc textDel, scope void delegate() @safe nothrow @nogc nullDel = null) scope @trusted {
 
@@ -251,14 +200,14 @@ export @safe nothrow @nogc:
         RCAllocator allocator = globalAllocator();
         JSONValue ret;
 
-        ret.node = allocator.make!Node(1, allocator, type);
+        ret.node = allocator.make!JSONState(1, allocator, type);
 
         final switch(type) {
         case Type.Array:
             ret.node.array = LinkedList!JSONValue(allocator);
             break;
         case Type.Object:
-            ret.node.obj = JSONObject.init;
+            ret.node.obj = HashMap!(String_UTF8, JSONValue).init;
             break;
         case Type.BigInteger:
             ret.node.bigInteger = DynamicBigInteger.init;
@@ -327,7 +276,7 @@ export @safe nothrow @nogc:
 
         sink.formattedWrite("JSONValue(@{:p}, type={:s} =>", this.node, this.node.type);
 
-        this.match((LinkedList!JSONValue) {}, (JSONObject) {}, (DynamicBigInteger bigInteger) {
+        this.match((LinkedList!JSONValue) {}, (HashMap!(String_UTF8, JSONValue)) {}, (DynamicBigInteger bigInteger) {
             sink.formattedWrite(" {:s}");
         }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
             sink ~= "\n";
@@ -368,32 +317,42 @@ unittest {
     assert(!value.isNull);
 
     value = 42;
-    value.match((LinkedList!JSONValue) => assert(0), (JSONObject) => assert(0), (DynamicBigInteger) => assert(0),
-            (double number) => assert(isClose(number, 42)), (String_UTF8) => assert(0), () => assert(0));
+    value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue)) => assert(0),
+            (DynamicBigInteger) => assert(0), (double number) => assert(isClose(number, 42)), (String_UTF8) => assert(0), () => assert(0));
 
     value = DynamicBigInteger.parse("95");
-    value.match((LinkedList!JSONValue) => assert(0), (JSONObject) => assert(0),
+    value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue)) => assert(0),
             (DynamicBigInteger bigInteger) => assert(bigInteger == DynamicBigInteger.parse("95")),
             (double) => assert(0), (String_UTF8) => assert(0), () => assert(0));
 
     value = String_UTF8("Hi there!");
-    value.match((LinkedList!JSONValue) => assert(0), (JSONObject) => assert(0), (DynamicBigInteger) => assert(0),
-            (double) => assert(0), (String_UTF8 text) => assert(text == "Hi there!"), () => assert(0));
+    value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue)) => assert(0),
+            (DynamicBigInteger) => assert(0), (double) => assert(0), (String_UTF8 text) => assert(text == "Hi there!"), () => assert(0));
 
     {
         JSONValue temp;
         temp = String_UTF8("Hi there!");
 
         value = Slice!JSONValue(temp);
-        value.match((LinkedList!JSONValue array) => assert(array == temp), (JSONObject) => assert(0),
+        value.match((LinkedList!JSONValue array) => assert(array == temp), (HashMap!(String_UTF8,
+                JSONValue)) => assert(0), (DynamicBigInteger) => assert(0), (double) => assert(0),
+                (String_UTF8) => assert(0), () => assert(0));
+    }
+
+    {
+        String_UTF8 key = "akey";
+        JSONValue temp;
+        temp = String_UTF8("Hi there!");
+
+        HashMap!(String_UTF8, JSONValue) kv;
+        kv[key] = temp;
+
+        value = kv;
+        value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue) map) => assert(key in map),
                 (DynamicBigInteger) => assert(0), (double) => assert(0), (String_UTF8) => assert(0), () => assert(0));
     }
 
     assert(value.attachedComments() == [String_UTF8("Some comment goes here")]);
-}
-
-struct JSONObject {
-
 }
 
 package(sidero.fileformats):
@@ -401,4 +360,50 @@ package(sidero.fileformats):
 struct JSONState {
     int refCount;
     RCAllocator allocator;
+
+    JSONValue.Type type;
+    DynamicArray!String_UTF8 attachedComments;
+
+    union {
+        LinkedList!JSONValue array;
+        HashMap!(String_UTF8, JSONValue) obj;
+        DynamicBigInteger bigInteger;
+        double number;
+        String_UTF8 text;
+    }
+
+@safe nothrow @nogc:
+
+     ~this() scope {
+        this.cleanup;
+    }
+
+    void cleanup() scope @trusted {
+        final switch(type) {
+        case JSONValue.Type.Array:
+            this.array.destroy;
+            break;
+        case JSONValue.Type.Object:
+            this.obj.destroy;
+            break;
+        case JSONValue.Type.BigInteger:
+            this.bigInteger.destroy;
+            break;
+        case JSONValue.Type.Number:
+            break;
+        case JSONValue.Type.Text:
+            this.text.destroy;
+            break;
+        }
+    }
+
+    void rc(bool addRef) scope @trusted {
+        if(addRef) {
+            refCount++;
+        } else if(refCount-- == 1) {
+            // no longer known about
+            RCAllocator allocator = this.allocator;
+            allocator.dispose(&this);
+        }
+    }
 }
