@@ -234,13 +234,32 @@ export @safe nothrow @nogc:
     }
 
     ///
-    int opCmp(scope JSONValue other) scope const {
+    int opCmp(scope JSONValue other) scope @trusted {
+        import sidero.base.containers.utils : genericCompare;
+
         if(this.node is other.node)
             return 0;
-        else if(this.node < other.node)
+        else if(this.isNull)
             return -1;
-        else
+        else if(other.isNull)
             return 1;
+        else if(this.node.type < other.node.type)
+            return -1;
+        else if(this.node.type > other.node.type)
+            return 1;
+
+        final switch(this.node.type) {
+        case JSONValue.Type.Array:
+            return this.node.array.opCmp(other.node.array);
+        case JSONValue.Type.Object:
+            return this.node.obj.opCmp(other.node.obj);
+        case JSONValue.Type.BigInteger:
+            return this.node.bigInteger.opCmp(other.node.bigInteger);
+        case JSONValue.Type.Number:
+            return this.node.number.genericCompare(other.node.number);
+        case JSONValue.Type.Text:
+            return this.node.text.opCmp(other.node.text);
+        }
     }
 
     ///
