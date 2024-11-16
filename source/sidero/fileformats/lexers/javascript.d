@@ -22,6 +22,7 @@ Tokens:
     \ EscapeSequence
         \' \" \\ \b \f \n \r \t \v \0
         27 22 5c 08 0c 0a 0d 09 0b 00
+        supports U+2028 and U+2029, \r\n \n
     any unicode character
     \ u XXXX
         is a UTF-16 code unit
@@ -600,15 +601,6 @@ private:
 
         if(this.hitError)
             return;
-
-        size_t isNewLineNext(scope ref const(char)* ptr) {
-            if(*ptr == '\n') {
-                return 1;
-            } else if(*ptr == 0xE2 && *(ptr + 1) == 0x80 && (*(ptr + 2) == 0xA8 || *(ptr + 2) == 0xA9)) {
-                return 3;
-            } else
-                return 0;
-        }
 
         while(currentCharacter < endOfFile) {
             startOfTokenOffsetPtr = currentCharacter;
@@ -1258,7 +1250,7 @@ private:
                                 this.currentCharacter++;
                                 this.currentLocation.lineOffset++;
 
-                                if(isNewLineNext(this.currentCharacter))
+                                if(isNewLineNext(this.currentCharacter)[0] > 0)
                                     goto RegexStartError;
 
                                 const countChars = decodeLength(*currentCharacter);
@@ -1283,7 +1275,7 @@ private:
                                         this.currentLocation.lineOffset++;
                                     }
 
-                                    if(isNewLineNext(this.currentCharacter))
+                                    if(isNewLineNext(this.currentCharacter)[0] > 0)
                                         goto RegexStartError;
 
                                     const countChars = decodeLength(*currentCharacter);
@@ -1298,7 +1290,7 @@ private:
                                 this.currentLocation.lineOffset++;
                             } else {
                                 // not-line-terminator but not * \ / [
-                                if(isNewLineNext(this.currentCharacter))
+                                if(isNewLineNext(this.currentCharacter)[0] > 0)
                                     goto RegexStartError;
 
                                 const countChars = decodeLength(*currentCharacter);
@@ -1337,7 +1329,7 @@ private:
                                             this.currentLocation.lineOffset++;
                                         }
 
-                                        if(isNewLineNext(this.currentCharacter))
+                                        if(isNewLineNext(this.currentCharacter)[0] > 0)
                                             goto RegexNextError;
 
                                         const countChars = decodeLength(*currentCharacter);
@@ -1359,7 +1351,7 @@ private:
                                         this.currentLocation.lineOffset++;
                                     }
 
-                                    if(isNewLineNext(this.currentCharacter))
+                                    if(isNewLineNext(this.currentCharacter)[0] > 0)
                                         goto RegexNextError;
 
                                     const countChars = decodeLength(*currentCharacter);
@@ -1460,7 +1452,7 @@ private:
                         } else {
                             const countChars = decodeLength(asciiChar);
 
-                            if(isNewLineNext(this.currentCharacter) > 0) {
+                            if(isNewLineNext(this.currentCharacter)[0] > 0) {
                                 this.currentLocation.lineNumber++;
                                 this.currentLocation.lineOffset = 1;
                             } else
@@ -1493,7 +1485,7 @@ private:
                             } else if(asciiChar == endOfTokenCharacter) {
                                 break;
                             } else {
-                                if(isNewLineNext(ptr) > 0) {
+                                if(isNewLineNext(ptr)[0] > 0) {
                                     this.currentLocation.lineNumber++;
                                     this.currentLocation.lineOffset = 1;
                                 } else
@@ -1530,7 +1522,7 @@ private:
 
                     if(*currentCharacter == 0) {
                         return;
-                    } else if(isNewLineNext(this.currentCharacter) > 0) {
+                    } else if(isNewLineNext(this.currentCharacter)[0] > 0) {
                         this.currentLocation.lineNumber++;
                         this.currentLocation.lineOffset = 1;
                         continue;
@@ -2235,7 +2227,15 @@ private:
             }
 
         default:
-            goto NotAnEscapeError;
+            size_t[2] consumedGiven = isNewLineNext(this.currentCharacter);
+
+            if(consumedGiven[0] > 0) {
+                this.currentCharacter += consumedGiven[0];
+                this.currentLocation.lineOffset = 1;
+                this.currentLocation.lineNumber++;
+                consumed += consumedGiven[0];
+            } else
+                goto NotAnEscapeError;
         }
 
         return true;
@@ -2404,8 +2404,25 @@ private:
             }
 
         default:
-            assert(0);
+            size_t[2] consumedGiven = isNewLineNext(ptr);
+
+            if(consumedGiven[0] > 0) {
+                ptr += consumedGiven[0];
+                return '\n';
+            } else
+                assert(0);
         }
+    }
+
+    static size_t[2] isNewLineNext(scope ref const(char)* ptr) @trusted {
+        if(*ptr == '\n') {
+            return [1, 1];
+        } else if(*ptr == '\r' && *(ptr + 1) == '\n') {
+            return [2, 2];
+        } else if(*ptr == 0xE2 && *(ptr + 1) == 0x80 && (*(ptr + 2) == 0xA8 || *(ptr + 2) == 0xA9)) {
+            return [3, 1];
+        } else
+            return [0, 0];
     }
 }
 
@@ -2781,6 +2798,7 @@ unittest {
     Check.testSuccessMultiLineComment("/* some text*/\n", " some text");
 
     // single quote string
+    Check.testSuccessString("'b\\\ne'", "be");
     Check.testSuccessString("'bae'", "bae");
     Check.testSuccessString("'b\ne'", "b\ne");
     Check.testSuccessString("'b\\ne'", "b\ne");
@@ -2790,6 +2808,7 @@ unittest {
     Check.testSuccessString("'b\\uD835\\uDD04e'", "b\U0001D504e");
 
     // double quote strings
+    Check.testSuccessString("\"b\\\ne\"", "be");
     Check.testSuccessString("\"bae\"", "bae");
     Check.testSuccessString("\"b\ne\"", "b\ne");
     Check.testSuccessString("\"b\\ne\"", "b\ne");
