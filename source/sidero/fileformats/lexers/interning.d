@@ -33,7 +33,7 @@ export @safe nothrow @nogc:
     }
 
     ///
-    String_UTF8 store(const(char)[] text, bool needsNormalization) scope {
+    String_UTF8 store(const(char)[] text, bool needsNormalization) scope @trusted {
         String_UTF8 input = String_UTF8(text);
 
         if(!needsNormalization) {

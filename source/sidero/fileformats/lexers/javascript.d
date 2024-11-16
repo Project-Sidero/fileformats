@@ -418,6 +418,7 @@ export @safe nothrow @nogc:
         }();
 
         this.interning.preFill(tableOfKeywords);
+        this.popFront;
     }
 
     this(return scope ref Lexer_Javascript other) scope @trusted {
@@ -471,6 +472,10 @@ export @safe nothrow @nogc:
         while_ = String_UTF8("while"), ///
         with_ = String_UTF8("with"), ///
         yield = String_UTF8("yield"), ///
+
+        // contextual
+        nan = String_UTF8("NaN"), ///
+        infinity = String_UTF8("Infinity"), ///
     }
 
     ///
@@ -493,13 +498,17 @@ export @safe nothrow @nogc:
     void popFront() scope @trusted {
         if(this.haveTokens > 1) {
             foreach(i, v; this.tokens) {
+                if(i == 0)
+                    continue;
+
                 this.tokens[i - 1] = v;
                 this.fileOffsetsGivenToken[i - 1] = this.fileOffsetsGivenToken[i];
             }
 
             this.haveTokens--;
         } else {
-            this.haveTokens--;
+            if(this.haveTokens > 0)
+                this.haveTokens--;
             fillToken(0, false);
         }
     }
@@ -1042,9 +1051,7 @@ private:
 
             case '-': {
                     if(*currentCharacter >= '0' && *currentCharacter <= '9') {
-                        currentCharacter--;
-                        this.currentLocation.lineOffset--;
-                        lexDecimalNumber(token);
+                        lexDecimalNumber(token, true);
                     } else {
                         token.type = Token.Type.Punctuation;
 
@@ -1065,8 +1072,6 @@ private:
 
             case '+': {
                     if(*currentCharacter >= '0' && *currentCharacter <= '9') {
-                        currentCharacter--;
-                        this.currentLocation.lineOffset--;
                         lexDecimalNumber(token);
                     } else {
                         token.type = Token.Type.Punctuation;
@@ -1908,7 +1913,7 @@ private:
         token.type = Token.Type.Number;
     }
 
-    void lexDecimalNumber(ref Token token) @trusted {
+    void lexDecimalNumber(ref Token token, bool negate = false) @trusted {
         import core.stdc.math : pow;
 
         const(char)* startOfToken = currentCharacter;
@@ -1936,6 +1941,9 @@ private:
 
             currentCharacter++;
             this.currentLocation.lineOffset++;
+
+            if(negate)
+                token.bigInteger = -token.bigInteger;
             return;
         } else
             token.type = Token.Type.Number;
@@ -1997,6 +2005,9 @@ private:
 
             token.number *= pow(10, exponent);
         }
+
+        if(negate)
+            token.number *= -1;
     }
 
     void parseTemplateLiteralBegin(ref Token token, bool isHead) @trusted {
@@ -2689,10 +2700,38 @@ unittest {
     Check.testSuccessNumber("011", 11);
     Check.testSuccessNumber("01_1", 11);
 
+    // +dec
+    Check.testSuccessNumber("+0", 0);
+    Check.testSuccessNumber("+00", 0);
+    Check.testSuccessNumber("+01", 1);
+    Check.testSuccessNumber("+00", 0);
+    Check.testSuccessNumber("+01", 1);
+    Check.testSuccessNumber("+011", 11);
+    Check.testSuccessNumber("+01_1", 11);
+
+    // -dec
+    Check.testSuccessNumber("-0", 0);
+    Check.testSuccessNumber("-00", 0);
+    Check.testSuccessNumber("-01", -1);
+    Check.testSuccessNumber("-00", 0);
+    Check.testSuccessNumber("-01", -1);
+    Check.testSuccessNumber("-011", -11);
+    Check.testSuccessNumber("-01_1", -11);
+
     // dec > 0
     Check.testSuccessNumber("1", 1);
     Check.testSuccessNumber("11", 11);
     Check.testSuccessNumber("1_1", 11);
+
+    // +dec > 0
+    Check.testSuccessNumber("+1", 1);
+    Check.testSuccessNumber("+11", 11);
+    Check.testSuccessNumber("+1_1", 11);
+
+    // -dec > 0
+    Check.testSuccessNumber("-1", -1);
+    Check.testSuccessNumber("-11", -11);
+    Check.testSuccessNumber("-1_1", -11);
 
     //n
     Check.testSuccessBigInteger("0n", DynamicBigInteger.parse("0"));
@@ -2702,6 +2741,24 @@ unittest {
     Check.testSuccessBigInteger("01n", DynamicBigInteger.parse("1"));
     Check.testSuccessBigInteger("011n", DynamicBigInteger.parse("11"));
     Check.testSuccessBigInteger("01_1n", DynamicBigInteger.parse("11"));
+
+    // +n
+    Check.testSuccessBigInteger("+0n", DynamicBigInteger.parse("0"));
+    Check.testSuccessBigInteger("+00n", DynamicBigInteger.parse("0"));
+    Check.testSuccessBigInteger("+01n", DynamicBigInteger.parse("1"));
+    Check.testSuccessBigInteger("+00n", DynamicBigInteger.parse("0"));
+    Check.testSuccessBigInteger("+01n", DynamicBigInteger.parse("1"));
+    Check.testSuccessBigInteger("+011n", DynamicBigInteger.parse("11"));
+    Check.testSuccessBigInteger("+01_1n", DynamicBigInteger.parse("11"));
+
+    // -n
+    Check.testSuccessBigInteger("-0n", DynamicBigInteger.parse("-0"));
+    Check.testSuccessBigInteger("-00n", DynamicBigInteger.parse("-0"));
+    Check.testSuccessBigInteger("-01n", DynamicBigInteger.parse("-1"));
+    Check.testSuccessBigInteger("-00n", DynamicBigInteger.parse("-0"));
+    Check.testSuccessBigInteger("-01n", DynamicBigInteger.parse("-1"));
+    Check.testSuccessBigInteger("-011n", DynamicBigInteger.parse("-11"));
+    Check.testSuccessBigInteger("-01_1n", DynamicBigInteger.parse("-11"));
 
     //.
     Check.testSuccessNumber("0.0", 0);
