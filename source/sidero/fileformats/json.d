@@ -173,7 +173,7 @@ export @safe nothrow @nogc:
         if(isNull)
             return false;
         else
-            return this.node.attachedComments.isNull;
+            return this.node.attachedComments.length > 0;
     }
 
     ///
@@ -185,6 +185,18 @@ export @safe nothrow @nogc:
             this.node.attachedComments = DynamicArray!String_UTF8(this.node.allocator);
 
         return this.node.attachedComments;
+    }
+
+    package(sidero.fileformats) {
+        void setOrAddAttachedComments(DynamicArray!String_UTF8 ac) scope {
+            if(isNull || ac.length == 0)
+                return;
+
+            if(this.node.attachedComments.length > 0)
+                ac ~= this.node.attachedComments;
+
+            this.node.attachedComments = ac;
+        }
     }
 
     ///
@@ -335,18 +347,30 @@ export @safe nothrow @nogc:
 
     ///
     void toStringPretty(Sink)(scope ref Sink sink) @trusted {
-        if(isNull || this.node.type == Type.Null) {
+        if(isNull) {
             sink ~= "JSONValue(null)";
             return;
+        } else if(this.node.type == Type.Null) {
+            sink.formattedWrite("JSONValue(JSONValue(@{:p}, type={:s}", cast(void*)this.node, this.node.type);
+        } else {
+            sink.formattedWrite("JSONValue(@{:p}, type={:s} =>", cast(void*)this.node, this.node.type);
+
+            this.match((LinkedList!JSONValue array) {
+                //TODO: array.toStringPretty(sink);
+            }, (HashMap!(String_UTF8, JSONValue) obj) {
+                //TODO: obj.toStringPretty(sink);
+            },
+                (DynamicBigInteger bigInteger) {
+                sink.formattedWrite(" {:s}");
+            }, (bool boolean) { sink ~= boolean ? " true" : " false"; }, (double number) {
+                sink.formattedWrite(" {:s}", number);
+            }, (String_UTF8 text) {
+                sink ~= "\n";
+                PrettyPrint pp = PrettyPrint.defaults;
+                pp.useQuotes = true;
+                pp(sink, text);
+            }, () => assert(0));
         }
-
-        sink.formattedWrite("JSONValue(@{:p}, type={:s} =>", this.node, this.node.type);
-
-        this.match((LinkedList!JSONValue) {}, (HashMap!(String_UTF8, JSONValue)) {}, (DynamicBigInteger bigInteger) {
-            sink.formattedWrite(" {:s}");
-        }, (bool boolean) { sink ~= boolean ? " true" : " false"; }, (double number) {
-            sink.formattedWrite(" {:s}", number);
-        }, (String_UTF8 text) { sink ~= "\n"; PrettyPrint pp = PrettyPrint.defaults; pp.useQuotes = true; pp(sink, text); }, () => assert(0));
 
         if(this.haveAttachedComments()) {
             sink ~= ",\ncomments =>\n";

@@ -3,6 +3,7 @@ public import sidero.fileformats.json;
 import sidero.fileformats.errors;
 import sidero.base.containers.map.hashmap;
 import sidero.base.containers.list.linkedlist;
+import sidero.base.containers.dynamicarray;
 import sidero.base.allocators;
 import sidero.base.allocators.classes;
 import sidero.base.text;
@@ -66,18 +67,31 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                 return JSONValue.create(JSONValue.Type.Null);
 
             Token token = lexer.token;
-            JSONValue ret = JSONValue.create(JSONValue.Type.Null);
-
-            {
-                // TODO: consume comments
-                token = lexer.token;
-            }
-
             if(errorSink.haveError)
                 return JSONValue.init;
-            else if (token.type == Token.Type.EndOfFile) {
+            else if(token.type == Token.Type.EndOfFile) {
                 errorSink.error(token.loc, "Expecting a token seen end of file");
                 return typeof(return).init;
+            }
+
+            JSONValue ret = JSONValue.create(JSONValue.Type.Null);
+            DynamicArray!String_UTF8 comments;
+
+            while(token.type == Token.Type.HashBangComment || token.type == Token.Type.SingleLineComment ||
+                    token.type == Token.Type.MultiLineComment) {
+                if(comments.isNull)
+                    comments = ret.attachedComments;
+
+                comments ~= token.text;
+                lexer.popFront;
+
+                token = lexer.token;
+                if(errorSink.haveError)
+                    return typeof(return).init;
+                else if(token.type == Token.Type.EndOfFile) {
+                    errorSink.error(token.loc, "Expecting a token seen end of file");
+                    return typeof(return).init;
+                }
             }
 
             final switch(token.type) {
@@ -208,7 +222,7 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                 Token token = lexer.token;
                 if(errorSink.haveError)
                     return typeof(return).init;
-                else if (token.type == Token.Type.EndOfFile) {
+                else if(token.type == Token.Type.EndOfFile) {
                     errorSink.error(token.loc, "Expecting a punctuation `:`, `}` or a string seen end of file");
                     return typeof(return).init;
                 }
@@ -224,9 +238,22 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                 }
 
                 String_UTF8 key;
+                DynamicArray!String_UTF8 comments;
 
                 {
-                    // TODO: key comments???
+                    while(token.type == Token.Type.HashBangComment || token.type == Token.Type.SingleLineComment ||
+                            token.type == Token.Type.MultiLineComment) {
+                        comments ~= token.text;
+                        lexer.popFront;
+
+                        token = lexer.token;
+                        if(errorSink.haveError)
+                            return typeof(return).init;
+                        else if(token.type == Token.Type.EndOfFile) {
+                            errorSink.error(token.loc, "Expecting a comment or a string seen end of file");
+                            return typeof(return).init;
+                        }
+                    }
 
                     if(token.type == Token.Type.String) {
                         key = token.text;
@@ -239,7 +266,7 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                     token = lexer.token;
                     if(errorSink.haveError)
                         return typeof(return).init;
-                    else if (token.type == Token.Type.EndOfFile) {
+                    else if(token.type == Token.Type.EndOfFile) {
                         errorSink.error(token.loc, "Expecting a punctuation `:` seen end of file");
                         return typeof(return).init;
                     }
@@ -258,7 +285,10 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                 }
 
                 {
-                    ret[key] = this.parseJSONValue();
+                    JSONValue jsonValue = this.parseJSONValue();
+                    jsonValue.setOrAddAttachedComments(comments);
+
+                    ret[key] = jsonValue;
                     if(errorSink.haveError)
                         return typeof(return).init;
                 }
@@ -267,7 +297,7 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                     token = lexer.token;
                     if(errorSink.haveError)
                         return typeof(return).init;
-                    else if (token.type == Token.Type.EndOfFile) {
+                    else if(token.type == Token.Type.EndOfFile) {
                         errorSink.error(token.loc, "Expecting a punctuation `,` or `}`, or a json value seen end of file");
                         return typeof(return).init;
                     }
@@ -457,5 +487,13 @@ unittest {
 
         head = Check.testSuccess("{ 'key': 123, 'another': 356 , }");
         assert(head.type == JSONValue.Type.Object);
+    }
+
+    {
+        JSONValue head = Check.testSuccess("/* comment */{ /* another */ 'key': /* and here */ 123, 'another': 356 , }");
+        assert(head.type == JSONValue.Type.Object);
+
+        import sidero.base.console;
+        debugWriteln(head);
     }
 }
