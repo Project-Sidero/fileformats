@@ -42,6 +42,14 @@ export @safe nothrow @nogc:
     }
 
     ///
+    void nullify() scope {
+        if(isNull)
+            return;
+
+        this.resetTo(Type.Null);
+    }
+
+    ///
     void opAssign(return scope ref JSONValue other) scope @trusted {
         this.destroy;
         this.__ctor(other);
@@ -117,6 +125,9 @@ export @safe nothrow @nogc:
         this.node.type = type;
 
         final switch(type) {
+        case Type.Null:
+            break;
+
         case Type.Array:
             fillUninitializedWithInit(this.node.array);
             this.node.array = LinkedList!JSONValue(this.node.allocator);
@@ -163,7 +174,7 @@ export @safe nothrow @nogc:
             scope void delegate(HashMap!(String_UTF8, JSONValue)) @safe nothrow @nogc objectDel, scope void delegate(
                 DynamicBigInteger) @safe nothrow @nogc bigIntegerDel,
             scope void delegate(double) @safe nothrow @nogc numberDel,
-            scope void delegate(String_UTF8) @safe nothrow @nogc textDel, scope void delegate() @safe nothrow @nogc nullDel = null) scope @trusted {
+            scope void delegate(String_UTF8) @safe nothrow @nogc textDel, scope void delegate() @safe nothrow @nogc nullDel) scope @trusted {
 
         if(isNull) {
             if(nullDel !is null)
@@ -172,6 +183,11 @@ export @safe nothrow @nogc:
         }
 
         final switch(this.node.type) {
+        case Type.Null:
+            if(nullDel !is null)
+                nullDel();
+            break;
+
         case Type.Array:
             if(arrayDel !is null)
                 arrayDel(this.node.array);
@@ -203,6 +219,8 @@ export @safe nothrow @nogc:
         ret.node = allocator.make!JSONState(1, allocator, type);
 
         final switch(type) {
+        case Type.Null:
+            break;
         case Type.Array:
             ret.node.array = LinkedList!JSONValue(allocator);
             break;
@@ -249,6 +267,8 @@ export @safe nothrow @nogc:
             return 1;
 
         final switch(this.node.type) {
+        case JSONValue.Type.Null:
+            return 0;
         case JSONValue.Type.Array:
             return this.node.array.opCmp(other.node.array);
         case JSONValue.Type.Object:
@@ -288,7 +308,7 @@ export @safe nothrow @nogc:
 
     ///
     void toStringPretty(Sink)(scope ref Sink sink) @trusted {
-        if(isNull) {
+        if(isNull || this.node.type == Type.Null) {
             sink ~= "JSONValue(null)";
             return;
         }
@@ -302,7 +322,7 @@ export @safe nothrow @nogc:
             PrettyPrint pp = PrettyPrint.defaults;
             pp.useQuotes = true;
             pp(sink, text);
-        });
+        }, () => assert(0));
 
         if(this.haveAttachedComments()) {
             sink ~= ",\ncomments =>\n";
@@ -317,6 +337,7 @@ export @safe nothrow @nogc:
 
     ///
     enum Type {
+        Null, ///
         Array, ///
         Object, ///
         BigInteger, ///
@@ -329,8 +350,11 @@ export @safe nothrow @nogc:
 unittest {
     import sidero.base.math.utils;
 
-    JSONValue value = JSONValue.create(JSONValue.Type.Number);
+    JSONValue value = JSONValue.create(JSONValue.Type.Null);
     assert(!value.isNull);
+
+    value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue)) => assert(0),
+            (DynamicBigInteger) => assert(0), (double number) => assert(0), (String_UTF8) => assert(0), () {});
 
     value.attachedComments() ~= String_UTF8("Some comment goes here");
     assert(!value.isNull);
@@ -399,6 +423,8 @@ struct JSONState {
 
     void cleanup() scope @trusted {
         final switch(type) {
+        case JSONValue.Type.Null:
+            break;
         case JSONValue.Type.Array:
             this.array.destroy;
             break;
