@@ -348,10 +348,16 @@ export @safe nothrow @nogc:
 
     ///
     void toStringPretty(Sink)(scope ref Sink sink, PrettyPrint pp) @trusted {
+        pp.emitPrefix(sink);
+
         if(isNull) {
             sink ~= "JSONValue@null";
             return;
-        } else if(this.node.type == Type.Null) {
+        }
+
+        pp.depth++;
+
+        if(this.node.type == Type.Null) {
             sink.formattedWrite("JSONValue@{:p}(type={:s}", cast(void*)this.node, this.node.type);
         } else {
             sink.formattedWrite("JSONValue@{:p}(type={:s} =>", cast(void*)this.node, this.node.type);
@@ -359,46 +365,36 @@ export @safe nothrow @nogc:
             this.match((LinkedList!JSONValue array) {
                 sink ~= "\n";
 
-                pp.depth++;
                 pp.startWithoutPrefix = false;
-
-                array.toStringPretty(sink /+, pp+/ );
-
-                pp.depth--;
+                array.toStringPretty(sink, pp);
             }, (HashMap!(String_UTF8, JSONValue) obj) {
                 sink ~= "\n";
 
-                pp.depth++;
                 pp.startWithoutPrefix = false;
-
-                obj.toStringPretty(sink /+, pp+/ );
-
-                pp.depth--;
+                obj.toStringPretty(sink, pp);
             }, (DynamicBigInteger bigInteger) { sink.formattedWrite(" {:s}", bigInteger); }, (bool boolean) {
                 sink ~= boolean ? " true" : " false";
             }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
                 sink ~= "\n";
 
-                pp.depth++;
                 pp.startWithoutPrefix = false;
-
                 pp(sink, text);
-
-                pp.depth--;
             }, () => assert(0));
         }
 
         if(this.haveAttachedComments()) {
-            sink ~= ", comments => ";
+            sink ~= ", comments =>\n";
+
+            pp.startWithoutPrefix = false;
             pp.depth++;
+            this.attachedComments().toStringPretty(sink , pp);
 
-            this.attachedComments().toStringPretty(sink /+, pp+/ );
-
-            pp.depth--;
             sink ~= ")";
+            pp.depth--;
         } else
             sink ~= ", have comments=false)";
 
+        pp.depth--;
     }
 
     ///
@@ -468,6 +464,14 @@ unittest {
         value = kv;
         value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue) map) => assert(key in map),
                 (DynamicBigInteger) => assert(0), (bool) => assert(0), (double) => assert(0), (String_UTF8) => assert(0), () => assert(0));
+
+        import sidero.base.console;
+        StringBuilder_UTF8 builder;
+        PrettyPrint pp = PrettyPrint.defaults;
+
+        pp(builder, value);
+
+        writeln(builder);
     }
 
     assert(value.attachedComments() == [String_UTF8("Some comment goes here")]);
