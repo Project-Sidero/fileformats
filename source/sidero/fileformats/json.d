@@ -322,8 +322,8 @@ export @safe nothrow @nogc:
     }
 
     ///
-    String_UTF8 toString(RCAllocator allocator = RCAllocator.init) @trusted {
-        StringBuilder_UTF8 ret = StringBuilder_UTF8(allocator);
+    String_UTF8 toString() @trusted {
+        StringBuilder_UTF8 ret = StringBuilder_UTF8();
         toString(ret);
         return ret.asReadOnly;
     }
@@ -331,52 +331,70 @@ export @safe nothrow @nogc:
     ///
     void toString(Sink)(scope ref Sink sink) @trusted {
         if(isNull) {
-            sink ~= "JSONValue(null)";
+            sink ~= "JSONValue@null";
             return;
         }
 
-        sink.formattedWrite("JSONValue({:p}, type={:s}, have comments={:s})", this.node, this.node.type, this.haveAttachedComments());
+        sink.formattedWrite("JSONValue@{:p}(type={:s}, have comments={:s})", cast(void*)this.node, this.node.type,
+                this.haveAttachedComments());
     }
 
     ///
-    String_UTF8 toStringPretty(RCAllocator allocator = RCAllocator.init) @trusted {
-        StringBuilder_UTF8 ret = StringBuilder_UTF8(allocator);
-        toStringPretty(ret);
+    String_UTF8 toStringPretty(PrettyPrint pp) @trusted {
+        StringBuilder_UTF8 ret = StringBuilder_UTF8();
+        toStringPretty(ret, pp);
         return ret.asReadOnly;
     }
 
     ///
-    void toStringPretty(Sink)(scope ref Sink sink) @trusted {
+    void toStringPretty(Sink)(scope ref Sink sink, PrettyPrint pp) @trusted {
         if(isNull) {
-            sink ~= "JSONValue(null)";
+            sink ~= "JSONValue@null";
             return;
         } else if(this.node.type == Type.Null) {
-            sink.formattedWrite("JSONValue(JSONValue(@{:p}, type={:s}", cast(void*)this.node, this.node.type);
+            sink.formattedWrite("JSONValue@{:p}(type={:s}", cast(void*)this.node, this.node.type);
         } else {
-            sink.formattedWrite("JSONValue(@{:p}, type={:s} =>", cast(void*)this.node, this.node.type);
+            sink.formattedWrite("JSONValue@{:p}(type={:s} =>", cast(void*)this.node, this.node.type);
 
             this.match((LinkedList!JSONValue array) {
-                //TODO: array.toStringPretty(sink);
-            }, (HashMap!(String_UTF8, JSONValue) obj) {
-                //TODO: obj.toStringPretty(sink);
-            },
-                (DynamicBigInteger bigInteger) {
-                sink.formattedWrite(" {:s}");
-            }, (bool boolean) { sink ~= boolean ? " true" : " false"; }, (double number) {
-                sink.formattedWrite(" {:s}", number);
-            }, (String_UTF8 text) {
                 sink ~= "\n";
-                PrettyPrint pp = PrettyPrint.defaults;
-                pp.useQuotes = true;
+
+                pp.depth++;
+                pp.startWithoutPrefix = false;
+
+                array.toStringPretty(sink /+, pp+/ );
+
+                pp.depth--;
+            }, (HashMap!(String_UTF8, JSONValue) obj) {
+                sink ~= "\n";
+
+                pp.depth++;
+                pp.startWithoutPrefix = false;
+
+                obj.toStringPretty(sink /+, pp+/ );
+
+                pp.depth--;
+            }, (DynamicBigInteger bigInteger) { sink.formattedWrite(" {:s}", bigInteger); }, (bool boolean) {
+                sink ~= boolean ? " true" : " false";
+            }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
+                sink ~= "\n";
+
+                pp.depth++;
+                pp.startWithoutPrefix = false;
+
                 pp(sink, text);
+
+                pp.depth--;
             }, () => assert(0));
         }
 
         if(this.haveAttachedComments()) {
-            sink ~= ",\ncomments =>\n";
+            sink ~= ", comments => ";
+            pp.depth++;
 
-            this.attachedComments().toStringPretty(sink);
+            this.attachedComments().toStringPretty(sink /+, pp+/ );
 
+            pp.depth--;
             sink ~= ")";
         } else
             sink ~= ", have comments=false)";
@@ -430,7 +448,7 @@ unittest {
             (String_UTF8 text) => assert(text == "Hi there!"), () => assert(0));
 
     {
-        JSONValue temp;
+        JSONValue temp = JSONValue.create(JSONValue.Type.Text);
         temp = String_UTF8("Hi there!");
 
         value = Slice!JSONValue(temp);
@@ -441,7 +459,7 @@ unittest {
 
     {
         String_UTF8 key = "akey";
-        JSONValue temp;
+        JSONValue temp = JSONValue.create(JSONValue.Type.Text);
         temp = String_UTF8("Hi there!");
 
         HashMap!(String_UTF8, JSONValue) kv;
