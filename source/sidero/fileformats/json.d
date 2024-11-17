@@ -375,9 +375,8 @@ export @safe nothrow @nogc:
             }, (DynamicBigInteger bigInteger) { sink.formattedWrite(" {:s}", bigInteger); }, (bool boolean) {
                 sink ~= boolean ? " true" : " false";
             }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
-                sink ~= "\n";
-
                 pp.startWithoutPrefix = false;
+                pp.startWithoutThePrefixSuffix = true;
                 pp(sink, text);
             }, () => assert(0));
         }
@@ -464,14 +463,6 @@ unittest {
         value = kv;
         value.match((LinkedList!JSONValue) => assert(0), (HashMap!(String_UTF8, JSONValue) map) => assert(key in map),
                 (DynamicBigInteger) => assert(0), (bool) => assert(0), (double) => assert(0), (String_UTF8) => assert(0), () => assert(0));
-
-        import sidero.base.console;
-        StringBuilder_UTF8 builder;
-        PrettyPrint pp = PrettyPrint.defaults;
-
-        pp(builder, value);
-
-        writeln(builder);
     }
 
     assert(value.attachedComments() == [String_UTF8("Some comment goes here")]);

@@ -492,8 +492,5 @@ unittest {
     {
         JSONValue head = Check.testSuccess("/* comment */{ /* another */ 'key': /* and here */ 123, 'another': 356 , }");
         assert(head.type == JSONValue.Type.Object);
-
-        import sidero.base.console;
-        debugWriteln(head);
     }
 }
