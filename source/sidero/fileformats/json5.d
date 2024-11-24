@@ -4,29 +4,114 @@ https://json5.org/
 module sidero.fileformats.json5;
 public import sidero.fileformats.json;
 import sidero.fileformats.errors;
+import sidero.eventloop.coroutine;
+import sidero.eventloop.coroutine.future_completion;
+import sidero.eventloop.filesystem;
+import sidero.eventloop.control;
 import sidero.base.containers.map.hashmap;
 import sidero.base.containers.list.linkedlist;
 import sidero.base.containers.dynamicarray;
+import sidero.base.containers.readonlyslice;
+import sidero.base.containers.appender;
 import sidero.base.allocators;
 import sidero.base.allocators.classes;
 import sidero.base.text;
 import sidero.base.path.file;
+import sidero.base.errors;
 
 export @safe nothrow @nogc:
+
+///
+Future!JSONValue readJSON5(FilePath filePath, ErrorSinkRef errorSink) @trusted {
+    static struct State {
+        File file;
+        Appender!char buffer;
+        Future!(Slice!ubyte) nextChunk;
+        ErrorSinkRef errorSink;
+
+    @safe nothrow @nogc:
+
+        this(File file, ErrorSinkRef errorSink) {
+            this.file = file;
+            this.errorSink = errorSink;
+        }
+
+        ~this() {
+        }
+    }
+
+    enum Stages {
+        OnStart,
+        NextChunk
+    }
+
+    alias Builder = CoroutineBuilder!(State, Stages, JSONValue, File, ErrorSinkRef);
+    Builder builder;
+
+    builder[Stages.OnStart] = (scope ref state) @trusted {
+        state.nextChunk = state.file.readChunk();
+        assert(!state.nextChunk.isNull);
+
+        // workaround for: https://issues.dlang.org/show_bug.cgi?id=23835
+        auto ret = Builder.nextStage(Stages.NextChunk).after(state.nextChunk);
+        return ret;
+    };
+
+    builder[Stages.NextChunk] = (scope ref state) @trusted {
+        auto result = state.nextChunk.result;
+
+        if(!result) {
+            if(state.file.isReadEOF()) {
+                JSONValue jsonValue;
+                if(parseJSON5(state.file.path.toString(), state.buffer.asReadOnly, state.errorSink, jsonValue))
+                    return Builder.complete(jsonValue);
+                else
+                    return Builder.complete(MalformedInputException("Not valid JSON5"));
+            }
+
+            return Builder.complete(result.getError());
+        }
+
+        state.buffer ~= cast(const(char)[])result.unsafeGetLiteral();
+
+        {
+            state.nextChunk = state.file.readChunk();
+            assert(!state.nextChunk.isNull);
+
+            // workaround for: https://issues.dlang.org/show_bug.cgi?id=23835
+            auto ret = Builder.nextStage(Stages.NextChunk).after(state.nextChunk);
+            return ret;
+        }
+    };
+
+    auto theFile = File.from(filePath, true);
+    if(!theFile) {
+        InstanceableCoroutine!(JSONValue, FutureTriggerStorage!(JSONValue)**) instantiable = acquireInstantiableFuture!(JSONValue)();
+        FutureTriggerStorage!(JSONValue)* triggerStorage;
+        Future!(JSONValue) future = instantiable.makeInstance(RCAllocator.init, &triggerStorage);
+
+        auto errorResult = completeWithoutATrigger(future, triggerStorage, theFile.getError().info);
+        assert(errorResult);
+
+        return future;
+    }
+
+    auto got = builder.build();
+    assert(got);
+
+    auto ret = got.makeInstance(RCAllocator.init, theFile, errorSink);
+    registerAsTask(ret);
+    return ret;
+}
 
 ///
 bool parseJSON5(FilePath filePath, String_UTF8 contents, out StringBuilder_UTF8 messages, out JSONValue jsonValue) {
     ErrorSinkRef_StringBuilder errorSink = ErrorSinkRef_StringBuilder.make;
 
-    bool ret = parseJSON5(filePath, contents, cast(ErrorSinkRef)errorSink, jsonValue);
+    bool ret = parseJSON5(filePath.toString(), contents, cast(ErrorSinkRef)errorSink, jsonValue);
 
     messages = errorSink.builder;
     return ret;
-}
-
-///
-bool parseJSON5(FilePath filePath, String_UTF8 contents, ErrorSinkRef errorSink, out JSONValue jsonValue) {
-    return parseJSON5(filePath.toString(), contents, errorSink, jsonValue);
 }
 
 ///
@@ -159,70 +244,75 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                                 return ret;
                             }
                         }
-                } else if(token.punctuation == '-') {
-                    if(nextIsNumber) {
-                        lexer.popFront;
-
-                        token = lexer.token;
-                        if(errorSink.haveError)
-                            return typeof(return).init;
-                        lexer.popFront;
-
-                        if(nextTokenType == Token.Type.Number)
-                            ret = -token.number;
-                        else
-                            ret = -token.bigInteger;
-
-                        return ret;
-                    } else if(nextTokenType == Token.Type.Identifier) {
-                        token = lexer.token2;
-
-                        if(token.text.ptr is Keywords.infinity.ptr) {
-                            lexer.popFront;
+                    } else if(token.punctuation == '-') {
+                        if(nextIsNumber) {
                             lexer.popFront;
 
-                            ret = -double.infinity;
+                            token = lexer.token;
+                            if(errorSink.haveError)
+                                return typeof(return).init;
+                            lexer.popFront;
+
+                            if(nextTokenType == Token.Type.Number)
+                                ret = -token.number;
+                            else
+                                ret = -token.bigInteger;
+
                             return ret;
+                        } else if(nextTokenType == Token.Type.Identifier) {
+                            token = lexer.token2;
+
+                            if(token.text.ptr is Keywords.infinity.ptr) {
+                                lexer.popFront;
+                                lexer.popFront;
+
+                                ret = -double.infinity;
+                                return ret;
+                            }
                         }
+                    } else if(token.punctuation == '{') {
+                        lexer.popFront;
+
+                        ret = parseObject();
+                        return ret;
+                    } else if(token.punctuation == '[') {
+                        lexer.popFront;
+
+                        ret = parseArray();
+                        return ret;
                     }
-                } else if(token.punctuation == '{') {
-                    lexer.popFront;
 
-                    ret = parseObject();
-                    return ret;
-                } else if(token.punctuation == '[') {
-                    lexer.popFront;
+                    errorSink.error(token.loc, "JSON5 does not support the punctuation: {:s}", token.punctuation);
 
-                    ret = parseArray();
-                    return ret;
+                    if(token.punctuation == '+' || token.punctuation == '-')
+                        errorSink.errorSupplimental("A `+` or `-` must be followed by a number.");
+                    return JSONValue.init;
                 }
 
-                errorSink.error(token.loc, "JSON5 does not support the punctuation: {:s}", token.punctuation);
+            case Token.Type.Number:
+                ret = token.number;
+                lexer.popFront;
+                return ret;
 
-                if(token.punctuation == '+' || token.punctuation == '-')
-                    errorSink.errorSupplimental("A `+` or `-` must be followed by a number.");
-                return JSONValue.init;
+            case Token.Type.BigInteger:
+                ret = token.bigInteger;
+                lexer.popFront;
+                return ret;
+
+            case Token.Type.RegexString:
+                assert(0);
+
+            case Token.Type.TemplateSubstitutionHead:
+            case Token.Type.TemplateSubstitutionMiddle:
+            case Token.Type.TemplateSubstitutionTail:
+                errorSink.error(token.loc, "Template substitution strings are not supported in JSON5");
+                break;
             }
 
-            case Token.Type.Number : ret = token.number;
-            lexer.popFront;
-            return ret;
-
-            case Token.Type.BigInteger : ret = token.bigInteger;
-            lexer.popFront;
-            return ret;
-
-            case Token.Type.RegexString : assert(0);
-
-            case Token.Type.TemplateSubstitutionHead : case Token.Type.TemplateSubstitutionMiddle : case Token.Type.TemplateSubstitutionTail
-                : errorSink.error(token.loc, "Template substitution strings are not supported in JSON5");
-            break;
+            assert(0);
         }
 
-        assert(0);
-    }
-
-    /*
+        /*
         JSON5Object:
             { }
             { JSON5MemberList ,|opt }
@@ -235,116 +325,116 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
             identifier
             string
         */
-    HashMap!(String_UTF8, JSONValue) parseObject() @trusted {
-        // { already consumed
+        HashMap!(String_UTF8, JSONValue) parseObject() @trusted {
+            // { already consumed
 
-        HashMap!(String_UTF8, JSONValue) ret = HashMap!(String_UTF8, JSONValue)(globalAllocator());
+            HashMap!(String_UTF8, JSONValue) ret = HashMap!(String_UTF8, JSONValue)(globalAllocator());
 
-        for(;;) {
-            Token token = lexer.token;
-            if(errorSink.haveError)
-                return typeof(return).init;
-            else if(token.type == Token.Type.EndOfFile) {
-                errorSink.error(token.loc, "Expecting a punctuation `:`, `}` or a string seen end of file");
-                return typeof(return).init;
-            }
-
-            if(token.type == Token.Type.Punctuation) {
-                if(token.punctuation == ',') {
-                    lexer.popFront;
-                    continue;
-                } else if(token.punctuation == '}') {
-                    lexer.popFront;
-                    break;
-                }
-            }
-
-            String_UTF8 key;
-            DynamicArray!String_UTF8 comments;
-
-            {
-                while(token.type == Token.Type.HashBangComment || token.type == Token.Type.SingleLineComment ||
-                        token.type == Token.Type.MultiLineComment) {
-                    comments ~= token.text;
-                    lexer.popFront;
-
-                    token = lexer.token;
-                    if(errorSink.haveError)
-                        return typeof(return).init;
-                    else if(token.type == Token.Type.EndOfFile) {
-                        errorSink.error(token.loc, "Expecting a comment or a string seen end of file");
-                        return typeof(return).init;
-                    }
-                }
-
-                if(token.type == Token.Type.String) {
-                    key = token.text;
-                    lexer.popFront;
-                } else {
-                    errorSink.error(token.loc, "Unexpected token type {:s}, expected string for object member name", token.type);
-                    return typeof(return).init;
-                }
-
-                token = lexer.token;
+            for(;;) {
+                Token token = lexer.token;
                 if(errorSink.haveError)
                     return typeof(return).init;
                 else if(token.type == Token.Type.EndOfFile) {
-                    errorSink.error(token.loc, "Expecting a punctuation `:` seen end of file");
-                    return typeof(return).init;
-                }
-
-                if(token.type == Token.Type.Punctuation) {
-                    if(token.punctuation == ':') {
-                        lexer.popFront;
-                    } else {
-                        errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `:`", token.punctuation);
-                        return typeof(return).init;
-                    }
-                } else {
-                    errorSink.error(token.loc, "Unexpected token {:s} expected a punctuation of `:`", token.type);
-                    return typeof(return).init;
-                }
-            }
-
-            {
-                JSONValue jsonValue = this.parseJSONValue();
-                jsonValue.setOrAddAttachedComments(comments);
-
-                ret[key] = jsonValue;
-                if(errorSink.haveError)
-                    return typeof(return).init;
-            }
-
-            {
-                token = lexer.token;
-                if(errorSink.haveError)
-                    return typeof(return).init;
-                else if(token.type == Token.Type.EndOfFile) {
-                    errorSink.error(token.loc, "Expecting a punctuation `,` or `}`, or a json value seen end of file");
+                    errorSink.error(token.loc, "Expecting a punctuation `:`, `}` or a string seen end of file");
                     return typeof(return).init;
                 }
 
                 if(token.type == Token.Type.Punctuation) {
                     if(token.punctuation == ',') {
                         lexer.popFront;
+                        continue;
                     } else if(token.punctuation == '}') {
                         lexer.popFront;
                         break;
+                    }
+                }
+
+                String_UTF8 key;
+                DynamicArray!String_UTF8 comments;
+
+                {
+                    while(token.type == Token.Type.HashBangComment || token.type == Token.Type.SingleLineComment ||
+                            token.type == Token.Type.MultiLineComment) {
+                        comments ~= token.text;
+                        lexer.popFront;
+
+                        token = lexer.token;
+                        if(errorSink.haveError)
+                            return typeof(return).init;
+                        else if(token.type == Token.Type.EndOfFile) {
+                            errorSink.error(token.loc, "Expecting a comment or a string seen end of file");
+                            return typeof(return).init;
+                        }
+                    }
+
+                    if(token.type == Token.Type.String) {
+                        key = token.text;
+                        lexer.popFront;
                     } else {
-                        errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `,` or `}`", token.punctuation);
+                        errorSink.error(token.loc, "Unexpected token type {:s}, expected string for object member name", token.type);
                         return typeof(return).init;
                     }
-                } else {
-                    errorSink.error(token.loc, "Unexpected token {:s} expected a punctuation of `,` or `}`", token.type);
-                    return typeof(return).init;
+
+                    token = lexer.token;
+                    if(errorSink.haveError)
+                        return typeof(return).init;
+                    else if(token.type == Token.Type.EndOfFile) {
+                        errorSink.error(token.loc, "Expecting a punctuation `:` seen end of file");
+                        return typeof(return).init;
+                    }
+
+                    if(token.type == Token.Type.Punctuation) {
+                        if(token.punctuation == ':') {
+                            lexer.popFront;
+                        } else {
+                            errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `:`", token.punctuation);
+                            return typeof(return).init;
+                        }
+                    } else {
+                        errorSink.error(token.loc, "Unexpected token {:s} expected a punctuation of `:`", token.type);
+                        return typeof(return).init;
+                    }
+                }
+
+                {
+                    JSONValue jsonValue = this.parseJSONValue();
+                    jsonValue.setOrAddAttachedComments(comments);
+
+                    ret[key] = jsonValue;
+                    if(errorSink.haveError)
+                        return typeof(return).init;
+                }
+
+                {
+                    token = lexer.token;
+                    if(errorSink.haveError)
+                        return typeof(return).init;
+                    else if(token.type == Token.Type.EndOfFile) {
+                        errorSink.error(token.loc, "Expecting a punctuation `,` or `}`, or a json value seen end of file");
+                        return typeof(return).init;
+                    }
+
+                    if(token.type == Token.Type.Punctuation) {
+                        if(token.punctuation == ',') {
+                            lexer.popFront;
+                        } else if(token.punctuation == '}') {
+                            lexer.popFront;
+                            break;
+                        } else {
+                            errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `,` or `}`", token.punctuation);
+                            return typeof(return).init;
+                        }
+                    } else {
+                        errorSink.error(token.loc, "Unexpected token {:s} expected a punctuation of `,` or `}`", token.type);
+                        return typeof(return).init;
+                    }
                 }
             }
+
+            return ret;
         }
 
-        return ret;
-    }
-
-    /*
+        /*
         JSON5Array:
             [ ]
             [ JSON5ElementList ,|opt ]
@@ -352,38 +442,17 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
             JSON5Value
             JSON4ElementList , JSON5Value
         */
-    LinkedList!JSONValue parseArray() {
-        // [ already consumed
-        LinkedList!JSONValue ret = LinkedList!JSONValue(globalAllocator());
+        LinkedList!JSONValue parseArray() {
+            // [ already consumed
+            LinkedList!JSONValue ret = LinkedList!JSONValue(globalAllocator());
 
-        for(;;) {
-            Token token = lexer.token;
-
-            if(token.type == Token.Type.Punctuation) {
-                if(token.punctuation == ',') {
-                    lexer.popFront;
-                    continue;
-                } else if(token.punctuation == ']') {
-                    lexer.popFront;
-                    break;
-                } else {
-                    errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `,` or `]`", token.punctuation);
-                    return typeof(return).init;
-                }
-            }
-
-            {
-                ret ~= this.parseJSONValue();
-                if(errorSink.haveError)
-                    return typeof(return).init;
-            }
-
-            {
-                token = lexer.token;
+            for(;;) {
+                Token token = lexer.token;
 
                 if(token.type == Token.Type.Punctuation) {
                     if(token.punctuation == ',') {
                         lexer.popFront;
+                        continue;
                     } else if(token.punctuation == ']') {
                         lexer.popFront;
                         break;
@@ -391,24 +460,45 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                         errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `,` or `]`", token.punctuation);
                         return typeof(return).init;
                     }
-                } else {
-                    errorSink.error(token.loc, "Unexpected token {:s} expected a punctuation of `,` or `]`", token.type);
-                    return typeof(return).init;
+                }
+
+                {
+                    ret ~= this.parseJSONValue();
+                    if(errorSink.haveError)
+                        return typeof(return).init;
+                }
+
+                {
+                    token = lexer.token;
+
+                    if(token.type == Token.Type.Punctuation) {
+                        if(token.punctuation == ',') {
+                            lexer.popFront;
+                        } else if(token.punctuation == ']') {
+                            lexer.popFront;
+                            break;
+                        } else {
+                            errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `,` or `]`", token.punctuation);
+                            return typeof(return).init;
+                        }
+                    } else {
+                        errorSink.error(token.loc, "Unexpected token {:s} expected a punctuation of `,` or `]`", token.type);
+                        return typeof(return).init;
+                    }
                 }
             }
+
+            return ret;
         }
-
-        return ret;
     }
-}
 
-if(errorSink.isNull)
-    return false;
+    if(errorSink.isNull)
+        return false;
 
-Parser parser = Parser(Lexer_Javascript(fileName, contents, errorSink), errorSink);
-jsonValue = parser.parseJSONValue();
+    Parser parser = Parser(Lexer_Javascript(fileName, contents, errorSink), errorSink);
+    jsonValue = parser.parseJSONValue();
 
-return !errorSink.haveError;
+    return !errorSink.haveError;
 }
 
 ///

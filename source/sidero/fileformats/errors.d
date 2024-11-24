@@ -1,7 +1,9 @@
 module sidero.fileformats.errors;
 import sidero.fileformats.lexers.defs : Loc;
 import sidero.base.allocators.classes;
+import sidero.base.synchronization.system.lock;
 import sidero.base.text;
+import sidero.base.internal.logassert;
 
 ///
 alias ErrorSinkRef = CRef!(ErrorSink!());
@@ -17,15 +19,25 @@ export extern (C++) class ErrorSink() : RootRefRCClass!() {
     bool haveError;
     bool gagged;
 
+    private SystemLock mutex;
+
 export @safe nothrow @nogc:
 
     ///
     void error(Loc location, String_UTF8 message) scope {
+        logAssert(cast(bool)mutex.lock, "Failed to lock");
+        scope(exit)
+            mutex.unlock;
+
         this.haveError = true;
     }
 
     ///
     void errorSupplimental(String_UTF8 message) scope {
+        logAssert(cast(bool)mutex.lock, "Failed to lock");
+        scope(exit)
+            mutex.unlock;
+
         this.haveError = true;
     }
 
@@ -74,18 +86,26 @@ export @safe nothrow @nogc:
 
     ///
     override void error(Loc location, String_UTF8 message) scope {
-        this.haveError = true;
+        if(!gagged) {
+            logAssert(cast(bool)mutex.lock, "Failed to lock");
+            scope(exit)
+                mutex.unlock;
 
-        if(!gagged)
+            this.haveError = true;
             writeln(useErrorStream(true), location.fileName, ":", location.lineNumber, ": error: ", message);
+        }
     }
 
     ///
     override void errorSupplimental(String_UTF8 message) scope {
-        this.haveError = true;
+        if(!gagged) {
+            logAssert(cast(bool)mutex.lock, "Failed to lock");
+            scope(exit)
+                mutex.unlock;
 
-        if(!gagged)
+            this.haveError = true;
             writeln(useErrorStream(true), "    ", message);
+        }
     }
 }
 
@@ -111,18 +131,26 @@ export @safe nothrow @nogc:
 
     ///
     override void error(Loc location, String_UTF8 message) scope {
-        this.haveError = true;
+        if(!gagged) {
+            logAssert(cast(bool)mutex.lock, "Failed to lock");
+            scope(exit)
+                mutex.unlock;
 
-        if(!gagged)
+            this.haveError = true;
             logger.error(location.fileName, ":", location.lineNumber, ": error: ", message);
+        }
     }
 
     ///
     override void errorSupplimental(String_UTF8 message) scope {
-        this.haveError = true;
+        if(!gagged) {
+            logAssert(cast(bool)mutex.lock, "Failed to lock");
+            scope(exit)
+                mutex.unlock;
 
-        if(!gagged)
+            this.haveError = true;
             logger.error("    ", message);
+        }
     }
 }
 
@@ -134,17 +162,25 @@ export @safe nothrow @nogc:
 
     ///
     override void error(Loc location, String_UTF8 message) scope {
-        this.haveError = true;
+        if(!gagged) {
+            logAssert(cast(bool)mutex.lock, "Failed to lock");
+            scope(exit)
+                mutex.unlock;
 
-        if(!gagged)
+            this.haveError = true;
             builder.formattedWrite(String_UTF8("{:s}:{:d}: error: {:s}\n"), location.fileName, location.lineNumber, message);
+        }
     }
 
     ///
     override void errorSupplimental(String_UTF8 message) scope {
-        this.haveError = true;
-
         if(!gagged) {
+            logAssert(cast(bool)mutex.lock, "Failed to lock");
+            scope(exit)
+                mutex.unlock;
+
+            this.haveError = true;
+
             builder ~= "    ";
             builder ~= message;
             builder ~= "\n";
