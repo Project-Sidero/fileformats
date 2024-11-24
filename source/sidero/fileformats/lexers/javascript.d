@@ -520,6 +520,13 @@ export @safe nothrow @nogc:
     }
 
     ///
+    Token token2(bool regexAllowed = false) return scope {
+        fillToken(0);
+        fillToken(1, regexAllowed);
+        return this.tokens[1];
+    }
+
+    ///
     Token.Type peek(bool regexAllowed = false) scope {
         fillToken(0);
         fillToken(1, regexAllowed);
