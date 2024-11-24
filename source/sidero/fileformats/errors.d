@@ -137,7 +137,7 @@ export @safe nothrow @nogc:
         this.haveError = true;
 
         if(!gagged)
-            builder.formattedWrite(String_UTF8("{:s}:{:d}: error: {:s}"), location.fileName, location.lineNumber, message);
+            builder.formattedWrite(String_UTF8("{:s}:{:d}: error: {:s}\n"), location.fileName, location.lineNumber, message);
     }
 
     ///
@@ -147,6 +147,7 @@ export @safe nothrow @nogc:
         if(!gagged) {
             builder ~= "    ";
             builder ~= message;
+            builder ~= "\n";
         }
     }
 }
