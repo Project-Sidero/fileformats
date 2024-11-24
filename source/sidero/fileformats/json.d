@@ -93,7 +93,7 @@ export @safe nothrow @nogc:
         if(isNull)
             return;
 
-        this.resetTo(Type.Text);
+        this.resetTo(Type.String);
         this.node.text = value;
     }
 
@@ -161,7 +161,7 @@ export @safe nothrow @nogc:
         case Type.Number:
             this.node.number = double.nan;
             break;
-        case Type.Text:
+        case Type.String:
             fillUninitializedWithInit(this.node.text);
             this.node.text = String_UTF8.init;
             break;
@@ -238,7 +238,7 @@ export @safe nothrow @nogc:
             if(numberDel !is null)
                 numberDel(this.node.number);
             break;
-        case Type.Text:
+        case Type.String:
             if(textDel !is null)
                 textDel(this.node.text);
             break;
@@ -270,7 +270,7 @@ export @safe nothrow @nogc:
         case Type.Number:
             ret.node.number = double.nan;
             break;
-        case Type.Text:
+        case Type.String:
             ret.node.text = String_UTF8.init;
             break;
         }
@@ -316,7 +316,7 @@ export @safe nothrow @nogc:
             return this.node.boolean.genericCompare(other.node.boolean);
         case JSONValue.Type.Number:
             return this.node.number.genericCompare(other.node.number);
-        case JSONValue.Type.Text:
+        case JSONValue.Type.String:
             return this.node.text.opCmp(other.node.text);
         }
     }
@@ -404,7 +404,7 @@ export @safe nothrow @nogc:
         BigInteger, ///
         Boolean, ///
         Number, ///
-        Text ///
+        String ///
     }
 }
 
@@ -443,7 +443,7 @@ unittest {
             (String_UTF8 text) => assert(text == "Hi there!"), () => assert(0));
 
     {
-        JSONValue temp = JSONValue.create(JSONValue.Type.Text);
+        JSONValue temp = JSONValue.create(JSONValue.Type.String);
         temp = String_UTF8("Hi there!");
 
         value = Slice!JSONValue(temp);
@@ -454,7 +454,7 @@ unittest {
 
     {
         String_UTF8 key = "akey";
-        JSONValue temp = JSONValue.create(JSONValue.Type.Text);
+        JSONValue temp = JSONValue.create(JSONValue.Type.String);
         temp = String_UTF8("Hi there!");
 
         HashMap!(String_UTF8, JSONValue) kv;
@@ -508,7 +508,7 @@ struct JSONState {
         case JSONValue.Type.Boolean:
         case JSONValue.Type.Number:
             break;
-        case JSONValue.Type.Text:
+        case JSONValue.Type.String:
             this.text.destroy;
             break;
         }

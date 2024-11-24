@@ -437,12 +437,12 @@ unittest {
         assert(head.type == JSONValue.Type.Number);
 
         head = Check.testSuccess("sometext");
-        assert(head.type == JSONValue.Type.Text);
+        assert(head.type == JSONValue.Type.String);
     }
 
     {
         JSONValue head = Check.testSuccess("'my text'");
-        assert(head.type == JSONValue.Type.Text);
+        assert(head.type == JSONValue.Type.String);
     }
 
     {
