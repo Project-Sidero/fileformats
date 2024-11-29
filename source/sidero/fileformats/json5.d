@@ -13,6 +13,7 @@ import sidero.base.containers.list.linkedlist;
 import sidero.base.containers.dynamicarray;
 import sidero.base.containers.readonlyslice;
 import sidero.base.containers.appender;
+import sidero.base.math.bigint;
 import sidero.base.allocators;
 import sidero.base.allocators.classes;
 import sidero.base.text;
@@ -102,6 +103,13 @@ Future!JSONValue readJSON5(FilePath filePath, ErrorSinkRef errorSink) @trusted {
     auto ret = got.makeInstance(RCAllocator.init, theFile, errorSink);
     registerAsTask(ret);
     return ret;
+}
+
+///
+GenericCoroutine writeJSON5(FilePath fileName, JSONValue jsonValue) {
+    StringBuilder_UTF8 builder = emitJSON5(jsonValue);
+    String_UTF8 str = builder.asReadOnly;
+    return write(fileName, str.asRawSlice);
 }
 
 ///
@@ -610,5 +618,160 @@ unittest {
     {
         JSONValue head = Check.testSuccess("/* comment */{ /* another */ 'key': /* and here */ 123, 'another': 356 , }");
         assert(head.type == JSONValue.Type.Object);
+    }
+}
+
+///
+StringBuilder_UTF8 emitJSON5(JSONValue jsonValue) {
+    StringBuilder_UTF8 builder;
+    emitJSON5(builder, jsonValue);
+    return builder;
+}
+
+///
+void emitJSON5(ref StringBuilder_UTF8 builder, JSONValue jsonValue) {
+    bool hasNewLines(String_UTF8 str) @safe nothrow @nogc {
+        return str.contains("\n") || str.contains("\u2028") || str.contains("\u2029");
+    }
+
+    void emitPrefix(bool needed, int depth) @safe nothrow @nogc {
+        if(!needed)
+            return;
+
+        foreach(i; 0 .. depth) {
+            builder ~= "    ";
+        }
+    }
+
+    void emitString(String_UTF8 str, int depth, bool requirePrefix) {
+        emitPrefix(requirePrefix, depth);
+        builder ~= "\"";
+
+        const startOffset = builder.length;
+        builder ~= str;
+
+        builder[startOffset .. builder.length].replace("\\", "\\\\");
+        builder[startOffset .. builder.length].replace("\"", "\\\"");
+
+        builder ~= "\"";
+    }
+
+    void handle(JSONValue jsonValue, int depth, bool requirePrefix) @safe nothrow @nogc {
+        jsonValue.match((LinkedList!JSONValue list) {
+            emitPrefix(requirePrefix, depth);
+            builder ~= "[\n";
+
+            bool haveOne;
+
+            foreach(value; list) {
+                assert(value);
+                if(haveOne)
+                    builder ~= ",\n";
+
+                haveOne = true;
+                handle(value, depth + 1, true);
+            }
+
+            if(haveOne)
+                builder ~= "\n";
+
+            emitPrefix(requirePrefix, depth);
+            builder ~= "]";
+        }, (HashMap!(String_UTF8, JSONValue) map) {
+            emitPrefix(requirePrefix, depth);
+            builder ~= "{\n";
+
+            bool haveOne;
+
+            foreach(key, value; map) {
+                assert(key);
+                assert(value);
+
+                if(haveOne)
+                    builder ~= ",\n";
+
+                haveOne = true;
+
+                emitString(key, depth + 1, true);
+                builder ~= ": ";
+                handle(value, depth + 1, false);
+            }
+
+            if(haveOne)
+                builder ~= "\n";
+
+            emitPrefix(requirePrefix, depth);
+            builder ~= "}";
+        }, (DynamicBigInteger bigInteger) {
+            emitPrefix(requirePrefix, depth);
+            bigInteger.toString(builder);
+            builder ~= "n";
+        }, (bool b) { emitPrefix(requirePrefix, depth); builder ~= b ? "true" : "false"; }, (double number) {
+            emitPrefix(requirePrefix, depth);
+            builder.formattedWrite((number > 999_999 || number < 0.000_001) ? "{:e}" : "{:f}", number);
+        }, (String_UTF8 text) { emitString(text, depth, requirePrefix); }, () {
+            emitPrefix(requirePrefix, depth);
+            builder ~= "null";
+        });
+    }
+
+    handle(jsonValue, 0, false);
+}
+
+///
+unittest {
+    import sidero.base.console;
+    import std.conv : text;
+
+    struct Check {
+    static @safe nothrow @nogc:
+        JSONValue testSuccess2(string fileName, string contents) {
+            ErrorSinkRef_StringBuilder errorSink = ErrorSinkRef_StringBuilder.make;
+            assert(!errorSink.isNull);
+            ErrorSinkRef errorSink2 = cast(ErrorSinkRef)errorSink;
+            assert(!errorSink2.isNull);
+
+            JSONValue jsonValue;
+
+            if(!parseJSON5(String_UTF8(fileName), String_UTF8(contents), errorSink2, jsonValue)) {
+                writeln(errorSink.builder);
+                assert(0);
+            }
+
+            return jsonValue;
+        }
+
+        void testSuccess(string mod = __MODULE__, int line = __LINE__)(string contents, string expected) {
+            static immutable fileName = text(mod, ":", line);
+            JSONValue jsonValue = testSuccess2(fileName, contents);
+            StringBuilder_UTF8 builder = emitJSON5(jsonValue);
+
+            if(builder != expected) {
+                debugWriteln(jsonValue, builder, "!=", expected);
+                assert(0);
+            }
+        }
+
+        void testSuccess(string mod = __MODULE__, int line = __LINE__)(string contents, string expected1, string expected2) {
+            static immutable fileName = text(mod, ":", line);
+            JSONValue jsonValue = testSuccess2(fileName, contents);
+            StringBuilder_UTF8 builder = emitJSON5(jsonValue);
+
+            if(!(builder == expected1 || builder == expected2)) {
+                debugWriteln(jsonValue, builder, "!=", expected1, " || ", expected2);
+                assert(0);
+            }
+        }
+    }
+
+    {
+        Check.testSuccess("'s\ne'", "\"s\ne\"");
+        Check.testSuccess("'s\u2028e'", "\"s\u2028e\"");
+    }
+
+    {
+        Check.testSuccess("['what', 'this']", "[\n    \"what\",\n    \"this\"\n]");
+        Check.testSuccess("{'key1' : 123, 'key2': 456}", "{\n    \"key1\": 123,\n    \"key2\": 456\n}",
+                "{\n    \"key2\": 456,\n    \"key1\": 123\n}");
     }
 }

@@ -360,38 +360,34 @@ export @safe nothrow @nogc:
         if(this.node.type == Type.Null) {
             sink.formattedWrite("JSONValue@{:p}(type={:s}", cast(void*)this.node, this.node.type);
         } else {
-            sink.formattedWrite("JSONValue@{:p}(type={:s} =>", cast(void*)this.node, this.node.type);
+            sink.formattedWrite("JSONValue@{:p}(type={:s}{:s} =>", cast(void*)this.node, this.node.type, this.haveAttachedComments() ? "" : ", have comments=false");
 
             this.match((LinkedList!JSONValue array) {
                 sink ~= "\n";
-
-                pp.startWithoutPrefix = false;
                 array.toStringPretty(sink, pp);
             }, (HashMap!(String_UTF8, JSONValue) obj) {
                 sink ~= "\n";
-
-                pp.startWithoutPrefix = false;
                 obj.toStringPretty(sink, pp);
             }, (DynamicBigInteger bigInteger) { sink.formattedWrite(" {:s}", bigInteger); }, (bool boolean) {
                 sink ~= boolean ? " true" : " false";
             }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
-                pp.startWithoutPrefix = false;
+                sink ~= "\n";
                 pp.startWithoutThePrefixSuffix = true;
                 pp(sink, text);
             }, () => assert(0));
         }
 
         if(this.haveAttachedComments()) {
-            sink ~= ", comments =>\n";
+            sink ~= "\n";
+            pp.emitPrefix(sink);
+            sink ~= "comments =>\n";
 
-            pp.startWithoutPrefix = false;
             pp.depth++;
             this.attachedComments().toStringPretty(sink , pp);
 
             sink ~= ")";
             pp.depth--;
-        } else
-            sink ~= ", have comments=false)";
+        }
 
         pp.depth--;
     }
