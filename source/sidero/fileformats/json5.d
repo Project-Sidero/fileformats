@@ -657,6 +657,24 @@ void emitJSON5(ref StringBuilder_UTF8 builder, JSONValue jsonValue) {
     }
 
     void handle(JSONValue jsonValue, int depth, bool requirePrefix) @safe nothrow @nogc {
+        foreach(comment; jsonValue.attachedComments()) {
+            assert(comment);
+
+            emitPrefix(requirePrefix, depth);
+
+            if (hasNewLines(comment)) {
+                builder ~= "/*";
+                builder ~= comment;
+                builder ~= "*/\n";
+            } else {
+                builder ~= "//";
+                builder ~= comment.stripRight();
+                builder ~= "\n";
+            }
+
+            requirePrefix = true;
+        }
+
         jsonValue.match((LinkedList!JSONValue list) {
             emitPrefix(requirePrefix, depth);
             builder ~= "[\n";
@@ -773,5 +791,9 @@ unittest {
         Check.testSuccess("['what', 'this']", "[\n    \"what\",\n    \"this\"\n]");
         Check.testSuccess("{'key1' : 123, 'key2': 456}", "{\n    \"key1\": 123,\n    \"key2\": 456\n}",
                 "{\n    \"key2\": 456,\n    \"key1\": 123\n}");
+    }
+
+    {
+        Check.testSuccess("[ /* what? */ 'thing' ]", "[\n    // what?\n    \"thing\"\n]");
     }
 }
