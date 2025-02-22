@@ -1,8 +1,8 @@
 module sidero.fileformats.lexers.javascript;
 import sidero.fileformats.lexers.interning;
-import sidero.fileformats.lexers.defs;
-import sidero.fileformats.errors;
 import sidero.base.text;
+import sidero.base.text.processing.defs;
+import sidero.base.text.processing.errors;
 import sidero.base.text.unicode.characters.uax31;
 import sidero.base.math.bigint;
 

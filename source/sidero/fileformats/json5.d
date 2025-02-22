@@ -3,7 +3,6 @@ https://json5.org/
 */
 module sidero.fileformats.json5;
 public import sidero.fileformats.json;
-import sidero.fileformats.errors;
 import sidero.eventloop.coroutine;
 import sidero.eventloop.coroutine.future_completion;
 import sidero.eventloop.filesystem;
@@ -17,6 +16,7 @@ import sidero.base.math.bigint;
 import sidero.base.allocators;
 import sidero.base.allocators.classes;
 import sidero.base.text;
+import sidero.base.text.processing.errors;
 import sidero.base.path.file;
 import sidero.base.errors;
 
