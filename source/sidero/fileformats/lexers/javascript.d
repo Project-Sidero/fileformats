@@ -997,8 +997,8 @@ private:
 
             EscapeIdentifierError:
                     this.errorSink.error(token.loc, "Identifier start is not valid.");
-                    this.errorSink.errorSupplimental("Valid characters must be part of start set.");
-                    this.errorSink.errorSupplimental(
+                    this.errorSink.errorSupplemental("Valid characters must be part of start set.");
+                    this.errorSink.errorSupplemental(
                             "May be an escaped UTF-16 code unit `\\uXXXX`, two may be used for UTF-16 surrogates.");
                     return;
                 }
@@ -1141,7 +1141,7 @@ private:
                     }
 
                     errorSink.error(token.loc, "Unknown character `#`");
-                    errorSink.errorSupplimental("Hash bang comments are of syntax `#!...\\n`");
+                    errorSink.errorSupplemental("Hash bang comments are of syntax `#!...\\n`");
                     return;
                 }
 
@@ -1430,13 +1430,13 @@ private:
 
             RegexStartError:
                     errorSink.error(token.loc, "Not a valid start for regex literal");
-                    errorSink.errorSupplimental(
+                    errorSink.errorSupplemental(
                             "Must be either a class `/[...]`, escape `\\c`, or a character that isn't `/` or a new line.");
                     return;
 
             RegexNextError:
                     errorSink.error(token.loc, "Not a valid body for regex literal");
-                    errorSink.errorSupplimental("Must be either a class `/[...]`, escape `\\c`, or a character that isn't a new line.");
+                    errorSink.errorSupplemental("Must be either a class `/[...]`, escape `\\c`, or a character that isn't a new line.");
                     return;
 
             RegexEndError:
@@ -1520,7 +1520,7 @@ private:
 
             StringLiteralEscapeError:
                     errorSink.error(token.loc, "invalid string literal `\"str\"` or `'str'`");
-                    errorSink.errorSupplimental("May be escaped `\\uXXXX` must be a UTF-16 code unit, two UTF-16 surrogates are supported");
+                    errorSink.errorSupplemental("May be escaped `\\uXXXX` must be a UTF-16 code unit, two UTF-16 surrogates are supported");
                     return;
                 }
 
@@ -1690,9 +1690,9 @@ private:
 
             EscapeIdentifierError:
                 errorSink.error(token.loc, "invalid identifier");
-                errorSink.errorSupplimental("Expecting an identifier with a valid start, then zero or more valid continue characters.");
-                errorSink.errorSupplimental("May be escaped `\\uXXXX` which is a UTF-16 code unit, two may be used for surrogates.");
-                errorSink.errorSupplimental("A code unit may be escaped as `\\u{XXXXXX}`.");
+                errorSink.errorSupplemental("Expecting an identifier with a valid start, then zero or more valid continue characters.");
+                errorSink.errorSupplemental("May be escaped `\\uXXXX` which is a UTF-16 code unit, two may be used for surrogates.");
+                errorSink.errorSupplemental("A code unit may be escaped as `\\u{XXXXXX}`.");
                 return;
             } else {
                 size_t consumed, offset;
@@ -1826,8 +1826,8 @@ private:
 
     EscapeSurrogateError:
         errorSink.error(currentLocation, "invalid escaped UTF-16 surrogate in identifier");
-        errorSink.errorSupplimental("May be escaped `\\uXXXX` which is a UTF-16 code unit, two may be used for surrogates.");
-        errorSink.errorSupplimental("A code unit may be escaped as `\\u{XXXXXX}`.");
+        errorSink.errorSupplemental("May be escaped `\\uXXXX` which is a UTF-16 code unit, two may be used for surrogates.");
+        errorSink.errorSupplemental("A code unit may be escaped as `\\u{XXXXXX}`.");
         return;
     }
 

@@ -33,7 +33,7 @@ export @safe nothrow @nogc:
     }
 
     ///
-    void errorSupplimental(String_UTF8 message) scope {
+    void errorSupplemental(String_UTF8 message) scope {
         logAssert(cast(bool)mutex.lock, "Failed to lock");
         scope(exit)
             mutex.unlock;
@@ -49,8 +49,8 @@ final extern (D):
     }
 
     ///
-    void errorSupplimental(string message) scope {
-        this.errorSupplimental(String_UTF8(message));
+    void errorSupplemental(string message) scope {
+        this.errorSupplemental(String_UTF8(message));
     }
 
     ///
@@ -60,9 +60,9 @@ final extern (D):
     }
 
     ///
-    void errorSupplimental(Args...)(string format, Args args) scope if (Args.length > 0) {
+    void errorSupplemental(Args...)(string format, Args args) scope if (Args.length > 0) {
         String_UTF8 text = formattedWrite(format, args).asReadOnly();
-        this.errorSupplimental(text);
+        this.errorSupplemental(text);
     }
 
     ///
@@ -72,9 +72,9 @@ final extern (D):
     }
 
     ///
-    void errorSupplimental(Args...)(String_UTF8 format, Args args) scope if (Args.length > 0) {
+    void errorSupplemental(Args...)(String_UTF8 format, Args args) scope if (Args.length > 0) {
         String_UTF8 text = formattedWrite(format, args).asReadOnly();
-        this.errorSupplimental(text);
+        this.errorSupplemental(text);
     }
 }
 
@@ -97,7 +97,7 @@ export @safe nothrow @nogc:
     }
 
     ///
-    override void errorSupplimental(String_UTF8 message) scope {
+    override void errorSupplemental(String_UTF8 message) scope {
         if(!gagged) {
             logAssert(cast(bool)mutex.lock, "Failed to lock");
             scope(exit)
@@ -142,7 +142,7 @@ export @safe nothrow @nogc:
     }
 
     ///
-    override void errorSupplimental(String_UTF8 message) scope {
+    override void errorSupplemental(String_UTF8 message) scope {
         if(!gagged) {
             logAssert(cast(bool)mutex.lock, "Failed to lock");
             scope(exit)
@@ -173,7 +173,7 @@ export @safe nothrow @nogc:
     }
 
     ///
-    override void errorSupplimental(String_UTF8 message) scope {
+    override void errorSupplemental(String_UTF8 message) scope {
         if(!gagged) {
             logAssert(cast(bool)mutex.lock, "Failed to lock");
             scope(exit)

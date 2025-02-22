@@ -293,7 +293,7 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                     errorSink.error(token.loc, "JSON5 does not support the punctuation: {:s}", token.punctuation);
 
                     if(token.punctuation == '+' || token.punctuation == '-')
-                        errorSink.errorSupplimental("A `+` or `-` must be followed by a number.");
+                        errorSink.errorSupplemental("A `+` or `-` must be followed by a number.");
                     return JSONValue.init;
                 }
 
