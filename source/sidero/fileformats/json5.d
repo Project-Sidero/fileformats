@@ -375,7 +375,10 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                         }
                     }
 
-                    if(token.type == Token.Type.String) {
+                    if(token.type == Token.Type.Punctuation && token.punctuation == '}') {
+                        lexer.popFront;
+                        break;
+                    } else if(token.type == Token.Type.String) {
                         key = token.text;
                         lexer.popFront;
                     } else {
@@ -662,7 +665,7 @@ void emitJSON5(ref StringBuilder_UTF8 builder, JSONValue jsonValue) {
 
             emitPrefix(requirePrefix, depth);
 
-            if (hasNewLines(comment)) {
+            if(hasNewLines(comment)) {
                 builder ~= "/*";
                 builder ~= comment;
                 builder ~= "*/\n";
