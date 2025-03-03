@@ -158,7 +158,7 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
             + number
             - number
         */
-        JSONValue parseJSONValue() @trusted {
+        JSONValue parseJSONValue(bool allowOnlyComment = false) @trusted {
             if(lexer.empty)
                 return JSONValue.create(JSONValue.Type.Null);
 
@@ -288,6 +288,8 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
 
                         ret = parseArray();
                         return ret;
+                    } else if(token.punctuation == ']' && allowOnlyComment) {
+                        return JSONValue.init;
                     }
 
                     errorSink.error(token.loc, "JSON5 does not support the punctuation: {:s}", token.punctuation);
@@ -474,7 +476,9 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                 }
 
                 {
-                    ret ~= this.parseJSONValue();
+                    JSONValue jsonValue = this.parseJSONValue(true);
+                    if(!jsonValue.isNull)
+                        ret ~= jsonValue;
                     if(errorSink.haveError)
                         return typeof(return).init;
                 }
