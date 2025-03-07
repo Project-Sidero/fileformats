@@ -355,8 +355,6 @@ export @safe nothrow @nogc:
             return;
         }
 
-        pp.depth++;
-
         if(this.node.type == Type.Null) {
             sink.formattedWrite("JSONValue@{:p}(type={:s}", cast(void*)this.node, this.node.type);
         } else {
