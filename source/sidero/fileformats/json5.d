@@ -380,7 +380,7 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                     if(token.type == Token.Type.Punctuation && token.punctuation == '}') {
                         lexer.popFront;
                         break;
-                    } else if(token.type == Token.Type.String) {
+                    } else if(token.type == Token.Type.Identifier || token.type == Token.Type.String) {
                         key = token.text;
                         lexer.popFront;
                     } else {
@@ -469,6 +469,8 @@ bool parseJSON5(String_UTF8 fileName, String_UTF8 contents, ErrorSinkRef errorSi
                     } else if(token.punctuation == ']') {
                         lexer.popFront;
                         break;
+                    } else if (token.punctuation == '{') {
+                        // object
                     } else {
                         errorSink.error(token.loc, "Unexpected punctuation of {:s}, expected `,` or `]`", token.punctuation);
                         return typeof(return).init;
