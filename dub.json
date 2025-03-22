@@ -35,9 +35,7 @@
         },
         {
             "name": "unittest",
-            "buildOptions": [
-                "betterC"
-            ]
+            "mainSourceFile": "source/app.d"
         }
     ]
 }
