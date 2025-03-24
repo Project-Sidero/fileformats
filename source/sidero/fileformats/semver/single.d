@@ -133,6 +133,21 @@ export @safe nothrow @nogc:
 
     ///
     static Result!SemVer from(ref String_UTF8 text) @trusted {
+        bool anyMajor, anyMinor, anyPatch;
+        Result!SemVer ret = SemVer.from(text, anyMajor, anyMinor, anyPatch);
+
+        if(anyMajor)
+            return typeof(return)(MalformedInputException("Invalid Semver spec any major"));
+        else if(anyMinor)
+            return typeof(return)(MalformedInputException("Invalid Semver spec any minor"));
+        else if(anyPatch)
+            return typeof(return)(MalformedInputException("Invalid Semver spec any patch"));
+        else
+            return ret;
+    }
+
+    ///
+    static Result!SemVer from(ref String_UTF8 text, out bool anyMajor, out bool anyMinor, out bool anyPatch) @trusted {
         const(char)[] textCurrent = text.unsafeGetLiteral, textStart = textCurrent;
 
         size_t lexNum(out uint num) {
@@ -213,18 +228,28 @@ export @safe nothrow @nogc:
 
         expect('v');
 
-        if(lexNum(ret.major) == 0) {
+        if(expect('*') == 1) {
+            anyMajor = true;
+            goto After;
+        } else if(lexNum(ret.major) == 0) {
             return typeof(return)(MalformedInputException("Invalid Semver spec major"));
-        } else if(expect('.') == 0)
-            goto Done;
-        else if(lexNum(ret.minor) == 0) {
+        } else if(expect('.') == 0) {
+            goto After;
+        } else if(expect('*') == 1) {
+            anyMinor = true;
+            goto After;
+        } else if(lexNum(ret.minor) == 0) {
             return typeof(return)(MalformedInputException("Invalid Semver spec minor"));
-        } else if(expect('.') == 0)
-            goto Done;
-        else if(lexNum(ret.patch) == 0) {
+        } else if(expect('.') == 0) {
+            goto After;
+        } else if(expect('*') == 1) {
+            anyPatch = true;
+            goto After;
+        } else if(lexNum(ret.patch) == 0) {
             return typeof(return)(MalformedInputException("Invalid Semver spec patch"));
         }
 
+    After:
         text = text[textCurrent.ptr - textStart.ptr .. $];
 
         if(expect('-') == 1) {
@@ -239,7 +264,6 @@ export @safe nothrow @nogc:
                 return typeof(return)(MalformedInputException("Invalid Semver spec for build"));
         }
 
-    Done:
         return typeof(return)(ret);
     }
 }
@@ -283,6 +307,30 @@ unittest {
     test("1.0.0+20130313144700", SemVer(1, 0, 0), "20130313144700");
     test("1.0.0-beta+exp.sha.5114f85", SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("beta"))), "exp.sha.5114f85");
     test("1.0.0+21AF26D3----117B344092BD", SemVer(1, 0, 0), "21AF26D3----117B344092BD");
+}
+
+///
+unittest {
+    void test(string text, SemVer expected, bool expectedAnyMajor, bool expectedAnyMinor, bool expectedAnyPatch) {
+        String_UTF8 text2 = String_UTF8(text);
+
+        bool anyMajor, anyMinor, anyPatch;
+
+        auto got = SemVer.from(text2, anyMajor, anyMinor, anyPatch);
+        assert(got);
+        assert(anyMajor == expectedAnyMajor);
+        assert(anyMinor == expectedAnyMinor);
+        assert(anyPatch == expectedAnyPatch);
+        assert(got.opEquals(expected));
+    }
+
+    test("*", SemVer(0, 0, 0), true, false, false);
+    test("1.*", SemVer(1, 0, 0), false, true, false);
+    test("1.2.*", SemVer(1, 2, 0), false, false, true);
+
+    test("*-alpha", SemVer(0, 0, 0, SemVerPreRelease(String_UTF8("alpha"))), true, false, false);
+    test("1.*-alpha", SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("alpha"))), false, true, false);
+    test("1.2.*-alpha", SemVer(1, 2, 0, SemVerPreRelease(String_UTF8("alpha"))), false, false, true);
 }
 
 ///
