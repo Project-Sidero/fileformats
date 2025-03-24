@@ -13,7 +13,7 @@ Identifier: ([a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*)?
 IdentifierList: IdentifierList . Identifier
                 Identifier
 
-Version: v? VersionId . VersionId . VersionId (\- IdentifierList)? (\+ IdentifierList)?
+Version: v? VersionId (\. VersionId)? (\. VersionId)? (\- IdentifierList)? (\+ IdentifierList)?
 */
 
 ///
@@ -36,6 +36,69 @@ export @safe nothrow @nogc:
 
     void opAssign(SemVer other) scope {
         this.__ctor(other);
+    }
+
+    ///
+    SemVer advancePatch(uint amount) {
+        this.patch += amount;
+
+        this.preRelease = SemVerPreRelease.init;
+        this.build = String_UTF8.init;
+
+        return this;
+    }
+
+    ///
+    unittest {
+        assert(SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advancePatch(2) == SemVer(1,
+                0, 2, SemVerPreRelease.init, String_UTF8.init));
+        assert(SemVer(0, 1, 0, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advancePatch(2) == SemVer(0,
+                1, 2, SemVerPreRelease.init, String_UTF8.init));
+        assert(SemVer(0, 0, 1, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advancePatch(2) == SemVer(0,
+                0, 3, SemVerPreRelease.init, String_UTF8.init));
+    }
+
+    ///
+    SemVer advanceMinor(uint amount) {
+        this.minor += amount;
+        this.patch = 0;
+
+        this.preRelease = SemVerPreRelease.init;
+        this.build = String_UTF8.init;
+
+        return this;
+    }
+
+    ///
+    unittest {
+        assert(SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advanceMinor(2) == SemVer(1,
+                2, 0, SemVerPreRelease.init, String_UTF8.init));
+        assert(SemVer(0, 1, 0, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advanceMinor(2) == SemVer(0,
+                3, 0, SemVerPreRelease.init, String_UTF8.init));
+        assert(SemVer(0, 0, 1, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advanceMinor(2) == SemVer(0,
+                2, 0, SemVerPreRelease.init, String_UTF8.init));
+    }
+
+    ///
+    SemVer advanceMajor(uint amount) {
+        this.major += amount;
+        this.minor = 0;
+        this.patch = 0;
+
+        this.preRelease = SemVerPreRelease.init;
+        this.build = String_UTF8.init;
+
+        return this;
+    }
+
+    ///
+    unittest {
+        assert(SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advanceMajor(2) == SemVer(3,
+                0, 0, SemVerPreRelease.init, String_UTF8.init));
+        assert(SemVer(0, 1, 0, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advanceMajor(2) == SemVer(2,
+                0, 0, SemVerPreRelease.init, String_UTF8.init));
+        assert(SemVer(0, 0, 1, SemVerPreRelease(String_UTF8("prerelease")), String_UTF8("build")).advanceMajor(2) == SemVer(2,
+                0, 0, SemVerPreRelease.init, String_UTF8.init));
     }
 
     ///
@@ -148,8 +211,19 @@ export @safe nothrow @nogc:
 
         SemVer ret;
 
-        if(lexNum(ret.major) == 0 || expect('.') == 0 || lexNum(ret.minor) == 0 || expect('.') == 0 || lexNum(ret.patch) == 0)
-            return typeof(return)(MalformedInputException("Invalid Semver spec"));
+        expect('v');
+
+        if(lexNum(ret.major) == 0) {
+            return typeof(return)(MalformedInputException("Invalid Semver spec major"));
+        } else if(expect('.') == 0)
+            goto Done;
+        else if(lexNum(ret.minor) == 0) {
+            return typeof(return)(MalformedInputException("Invalid Semver spec minor"));
+        } else if(expect('.') == 0)
+            goto Done;
+        else if(lexNum(ret.patch) == 0) {
+            return typeof(return)(MalformedInputException("Invalid Semver spec patch"));
+        }
 
         text = text[textCurrent.ptr - textStart.ptr .. $];
 
@@ -165,6 +239,7 @@ export @safe nothrow @nogc:
                 return typeof(return)(MalformedInputException("Invalid Semver spec for build"));
         }
 
+    Done:
         return typeof(return)(ret);
     }
 }
@@ -180,12 +255,19 @@ unittest {
         assert(got.build == build);
     }
 
-    test("0.0.0", SemVer.init);
-    test("0.1.0", SemVer(0, 1, 0));
+    test("0", SemVer(0, 0, 0));
+    test("1", SemVer(1, 0, 0));
+    test("0.1", SemVer(0, 1, 0));
+
+    test("0.0.0", SemVer(0, 0, 0));
     test("1.0.0", SemVer(1, 0, 0));
+    test("0.1.0", SemVer(0, 1, 0));
+    test("0.0.1", SemVer(0, 0, 1));
     test("1.9.0", SemVer(1, 9, 0));
     test("1.10.0", SemVer(1, 10, 0));
     test("1.11.0", SemVer(1, 11, 0));
+    test("1.11.2", SemVer(1, 11, 2));
+    test("v1.2.3", SemVer(1, 2, 3));
 
     test("1.0.0-alpha", SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("alpha"))));
     test("1.0.0-alpha.1", SemVer(1, 0, 0, SemVerPreRelease(String_UTF8("alpha.1"))));
