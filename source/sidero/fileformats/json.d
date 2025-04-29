@@ -7,6 +7,7 @@ import sidero.base.containers.readonlyslice;
 import sidero.base.containers.list.linkedlist;
 import sidero.base.containers.map.hashmap;
 import sidero.base.attributes;
+import sidero.base.errors;
 
 /// Wrapper around the types that JSON supports as a value, along with comments.
 struct JSONValue {
@@ -200,6 +201,74 @@ export @safe nothrow @nogc:
     }
 
     ///
+    ErrorResult expectNull() {
+        if(this.isNull || this.node.type == Type.Null)
+            return ErrorResult.init;
+        else
+            return ErrorResult(NonMatchingExpectedStateException("Expected a node of type null"));
+    }
+
+    ///
+    Result!(LinkedList!JSONValue) expectArray() @trusted {
+        if(this.isNull)
+            return typeof(return)(NullPointerException("Expected a node of type array but is null"));
+        else if(this.node.type == Type.Array)
+            return typeof(return)(this.node.array);
+        else
+            return typeof(return)(NonMatchingExpectedStateException("Expected a node of type array"));
+    }
+
+    ///
+    Result!(HashMap!(String_UTF8, JSONValue)) expectObject() @trusted {
+        if(this.isNull)
+            return typeof(return)(NullPointerException("Expected a node of type object but is null"));
+        else if(this.node.type == Type.Object)
+            return typeof(return)(this.node.obj);
+        else
+            return typeof(return)(NonMatchingExpectedStateException("Expected a node of type object"));
+    }
+
+    ///
+    Result!(DynamicBigInteger) expectBigInteger() @trusted {
+        if(this.isNull)
+            return typeof(return)(NullPointerException("Expected a node of type big integer but is null"));
+        else if(this.node.type == Type.BigInteger)
+            return typeof(return)(this.node.bigInteger);
+        else
+            return typeof(return)(NonMatchingExpectedStateException("Expected a node of type big integer"));
+    }
+
+    ///
+    Result!(bool) expectBoolean() @trusted {
+        if(this.isNull)
+            return typeof(return)(NullPointerException("Expected a node of type boolean but is null"));
+        else if(this.node.type == Type.Boolean)
+            return typeof(return)(this.node.boolean);
+        else
+            return typeof(return)(NonMatchingExpectedStateException("Expected a node of type boolean"));
+    }
+
+    ///
+    Result!(double) expectNumber() @trusted {
+        if(this.isNull)
+            return typeof(return)(NullPointerException("Expected a node of type number but is null"));
+        else if(this.node.type == Type.Number)
+            return typeof(return)(this.node.number);
+        else
+            return typeof(return)(NonMatchingExpectedStateException("Expected a node of type number"));
+    }
+
+    ///
+    Result!(String_UTF8) expectString() @trusted {
+        if(this.isNull)
+            return typeof(return)(NullPointerException("Expected a node of type string but is null"));
+        else if(this.node.type == Type.String)
+            return typeof(return)(this.node.text);
+        else
+            return typeof(return)(NonMatchingExpectedStateException("Expected a node of type string"));
+    }
+
+    ///
     void match(scope void delegate(LinkedList!JSONValue) @safe nothrow @nogc arrayDel,
             scope void delegate(HashMap!(String_UTF8, JSONValue)) @safe nothrow @nogc objectDel, scope void delegate(
                 DynamicBigInteger) @safe nothrow @nogc bigIntegerDel,
@@ -358,21 +427,15 @@ export @safe nothrow @nogc:
         if(this.node.type == Type.Null) {
             sink.formattedWrite("JSONValue@{:p}(type={:s}", cast(void*)this.node, this.node.type);
         } else {
-            sink.formattedWrite("JSONValue@{:p}(type={:s}{:s} =>", cast(void*)this.node, this.node.type, this.haveAttachedComments() ? "" : ", have comments=false");
+            sink.formattedWrite("JSONValue@{:p}(type={:s}{:s} =>", cast(void*)this.node, this.node.type,
+                    this.haveAttachedComments() ? "" : ", have comments=false");
 
-            this.match((LinkedList!JSONValue array) {
-                sink ~= "\n";
-                array.toStringPretty(sink, pp);
-            }, (HashMap!(String_UTF8, JSONValue) obj) {
-                sink ~= "\n";
-                obj.toStringPretty(sink, pp);
-            }, (DynamicBigInteger bigInteger) { sink.formattedWrite(" {:s}", bigInteger); }, (bool boolean) {
-                sink ~= boolean ? " true" : " false";
-            }, (double number) { sink.formattedWrite(" {:s}", number); }, (String_UTF8 text) {
-                sink ~= "\n";
-                pp.startWithoutThePrefixSuffix = true;
-                pp(sink, text);
-            }, () => assert(0));
+            this.match((LinkedList!JSONValue array) { sink ~= "\n"; array.toStringPretty(sink, pp); },
+                    (HashMap!(String_UTF8, JSONValue) obj) { sink ~= "\n"; obj.toStringPretty(sink, pp); }, (DynamicBigInteger bigInteger) {
+                sink.formattedWrite(" {:s}", bigInteger);
+            }, (bool boolean) { sink ~= boolean ? " true" : " false"; }, (double number) {
+                sink.formattedWrite(" {:s}", number);
+            }, (String_UTF8 text) { sink ~= "\n"; pp.startWithoutThePrefixSuffix = true; pp(sink, text); }, () => assert(0));
         }
 
         if(this.haveAttachedComments()) {
@@ -381,7 +444,7 @@ export @safe nothrow @nogc:
             sink ~= "comments =>\n";
 
             pp.depth++;
-            this.attachedComments().toStringPretty(sink , pp);
+            this.attachedComments().toStringPretty(sink, pp);
 
             sink ~= ")";
             pp.depth--;
