@@ -234,6 +234,7 @@ export @safe nothrow @nogc:
         } else if(lexNum(ret.major) == 0) {
             return typeof(return)(MalformedInputException("Invalid Semver spec major"));
         } else if(expect('.') == 0) {
+            anyMinor = true;
             goto After;
         } else if(expect('*') == 1) {
             anyMinor = true;
@@ -241,6 +242,7 @@ export @safe nothrow @nogc:
         } else if(lexNum(ret.minor) == 0) {
             return typeof(return)(MalformedInputException("Invalid Semver spec minor"));
         } else if(expect('.') == 0) {
+            anyPatch = true;
             goto After;
         } else if(expect('*') == 1) {
             anyPatch = true;
@@ -273,7 +275,9 @@ unittest {
     void test(string text, SemVer expected, string build = "") {
         String_UTF8 text2 = String_UTF8(text);
 
-        auto got = SemVer.from(text2);
+        bool anyMajor, anyMinor, anyPatch;
+
+        auto got = SemVer.from(text2, anyMajor, anyMinor, anyPatch);
         assert(got);
         assert(got.opEquals(expected));
         assert(got.build == build);
